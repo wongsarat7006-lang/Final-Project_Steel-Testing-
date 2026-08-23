@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 6
+names: ['crazing', 'inclusion', 'patches', 'pitted_surface', 'rolled-in_scale', 'scratches']
+
+roboflow:
+  workspace: pavithraa-sekar
+  project: neu-surface-defect-dataset
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/pavithraa-sekar/neu-surface-defect-dataset/dataset/1

@@ -1,0 +1,17 @@
+# Virtual environment
+venv/
+
+# Dataset (ไฟล์ใหญ่เกินไปสำหรับ GitHub)
+train/
+valid/
+
+# Model weights และผลการเทรน
+runs/
+*.pt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
