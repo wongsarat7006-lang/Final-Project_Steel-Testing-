@@ -1,0 +1,14 @@
+# Stage 2 + pipeline
+# ติดตั้ง PyTorch แบบมี CUDA แยกก่อน (ดู https://pytorch.org):
+#   pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+ultralytics==8.4.126
+opencv-python>=4.9
+pillow>=10.0
+numpy>=1.26
+
+# Prototype UI (app.py)
+gradio>=4.44
+
+# torch / torchvision — ติดตั้งตามคอมเมนต์ด้านบน (ไม่ pin ที่นี่เพราะขึ้นกับ CUDA ของเครื่อง)
+torch>=2.2
+torchvision>=0.17

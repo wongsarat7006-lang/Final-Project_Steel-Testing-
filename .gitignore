@@ -1,13 +1,22 @@
 # Virtual environment
 venv/
+.venv/
 
-# Dataset (ไฟล์ใหญ่เกินไปสำหรับ GitHub)
+# Datasets (ไฟล์ใหญ่เกินไปสำหรับ GitHub)
 train/
 valid/
+test/
+merged_dataset/
+rust_dataset/
+crack_dataset/
 
 # Model weights และผลการเทรน
 runs/
 *.pt
+
+# ผลลัพธ์ที่ generate ได้เอง
+pipeline_results/
+evaluation_results.json
 
 # Python cache
 __pycache__/
