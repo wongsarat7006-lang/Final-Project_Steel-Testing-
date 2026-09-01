@@ -171,11 +171,20 @@ def main():
     parser.add_argument("--labels", default=str(BASE_DIR / "merged_dataset" / "test" / "labels"))
     parser.add_argument("--conf", type=float, default=0.4)
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
+    parser.add_argument("--weights", default=None,
+                        help="path ของ Stage 2 .pt (default: ตัวใน pipeline.py = train-clean/best.pt)")
     parser.add_argument("--out", default=str(BASE_DIR / "evaluation_results.json"))
     args = parser.parse_args()
 
+    if args.weights:
+        w = Path(args.weights)
+        if not w.is_file():
+            raise SystemExit(f"ไม่พบไฟล์ weights: {w}")
+        P.STAGE2_MODEL_PATH = w
+        print(f"ใช้ Stage 2 weights: {w}")
+
     device = P.resolve_device(args.device)
-    report = {"device": device}
+    report = {"device": device, "stage2_weights": str(P.STAGE2_MODEL_PATH)}
 
     if args.mode in ("stage2", "both"):
         report["stage2"] = eval_stage2(args.data, args.split, device)

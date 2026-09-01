@@ -33,6 +33,10 @@ def main():
     parser.add_argument("--patience", type=int, default=20, help="early stopping")
     parser.add_argument("--resume", action="store_true", help="เทรนต่อจาก checkpoint ล่าสุด")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--recipe", default="default", choices=["default", "texture"],
+                        help="default = augmentation เดิม | "
+                             "texture = ลด mosaic/scale เพื่อรักษา texture เต็มภาพ "
+                             "(แก้คลาส crazing/rolled-in_scale ที่โดนมองข้าม)")
     args = parser.parse_args()
 
     if args.device == "auto":
@@ -63,6 +67,27 @@ def main():
         print(f"device : {device}  (cuda available = {torch.cuda.is_available()})")
         print(f"epochs : {args.epochs}  imgsz {args.imgsz}  batch {args.batch}\n")
 
+        # --- augmentation recipes ---
+        # default : mosaic เต็ม + scale/degrees สูง — ดีกับคลาสที่ตำหนิเป็นก้อนชัด
+        # texture : ลด mosaic (0.3) + close เร็ว + scale/degrees ต่ำ — รักษา texture ละเอียด
+        #           ที่กินทั้งภาพ (crazing = ร่างแหรอยแตก, rolled-in_scale = ริ้วสเกล)
+        #           เพราะ mosaic ย่อภาพ 200px เหลือ ~100px ทำให้ texture หายจนโมเดล
+        #           เรียนรู้ว่า "ไม่มั่นใจ = background" -> recall ตก (ดู confusion matrix val-2)
+        if args.recipe == "texture":
+            aug = dict(
+                hsv_h=0.015, hsv_s=0.3, hsv_v=0.4,
+                degrees=5.0, translate=0.1, scale=0.2, fliplr=0.5, flipud=0.5,
+                mosaic=0.3, close_mosaic=20, mixup=0.0, erasing=0.2,
+                cos_lr=True,
+            )
+        else:
+            aug = dict(
+                hsv_h=0.015, hsv_s=0.5, hsv_v=0.4,
+                degrees=10.0, translate=0.1, scale=0.4, fliplr=0.5, flipud=0.2,
+                mosaic=1.0, close_mosaic=10,
+            )
+        print(f"recipe : {args.recipe}  ->  {aug}\n")
+
         model = YOLO(args.model)
         results = model.train(
             data=str(data_path),
@@ -75,10 +100,7 @@ def main():
             workers=args.workers,
             seed=0,
             deterministic=True,
-            # augmentation ที่เหมาะกับภาพพื้นผิวโลหะ
-            hsv_h=0.015, hsv_s=0.5, hsv_v=0.4,
-            degrees=10.0, translate=0.1, scale=0.4, fliplr=0.5, flipud=0.2,
-            mosaic=1.0, close_mosaic=10,
+            **aug,
         )
 
     save_dir = Path(results.save_dir) if hasattr(results, "save_dir") else Path("runs/detect") / args.name

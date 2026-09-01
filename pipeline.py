@@ -26,7 +26,7 @@ from ultralytics import YOLO
 # ===== Path (อ้างอิงจากตำแหน่งไฟล์นี้ ไม่ผูกกับ working directory) =====
 BASE_DIR = Path(__file__).resolve().parent
 STAGE1_MODEL_PATH = BASE_DIR / "DMS46_v1.pt"
-STAGE2_MODEL_PATH = BASE_DIR / "runs" / "detect" / "train-clean" / "weights" / "best.pt"
+STAGE2_MODEL_PATH = BASE_DIR / "runs" / "detect" / "train-balanced" / "weights" / "best.pt"
 
 # DMS46 ทำนายเป็น index 0-45 (เรียงจาก taxonomy 46 ชนิดที่โมเดลรองรับ)
 # วัสดุ "Metal" คือ taxonomy id 26 ซึ่งตรงกับ output index 22 ของโมเดล
@@ -221,7 +221,8 @@ def mask_to_boxes(mask, min_area=500, max_area_ratio=0.98, min_fill_ratio=0.10):
 
 
 def run_stage2(stage2_model, crop_image, conf: float, device: str):
-    """รัน YOLO ตรวจตำหนิบน crop, คืน list ของ detection เรียงตาม confidence มาก->น้อย"""
+    """รัน YOLO ตรวจตำหนิบน crop, คืน list ของ detection เรียงตาม confidence มาก->น้อย
+    (bbox เป็นพิกัดของ crop — ผู้เรียกต้องบวก offset ของ region เองถ้าจะเทียบข้ามบริเวณ)"""
     if crop_image.size == 0 or crop_image.shape[0] < 8 or crop_image.shape[1] < 8:
         return []
     results = stage2_model.predict(
@@ -235,13 +236,44 @@ def run_stage2(stage2_model, crop_image, conf: float, device: str):
                 "class": DEFECT_CLASSES[cls_id],
                 "confidence": float(box.conf[0]),
                 "bbox_xywh": [round(v, 1) for v in box.xywh[0].tolist()],
+                "bbox_xyxy_crop": [round(v, 1) for v in box.xyxy[0].tolist()],
             })
     detections.sort(key=lambda d: d["confidence"], reverse=True)
     return detections
 
 
+def _iou_xyxy(a, b):
+    """IoU ของกรอบสองอันในรูปแบบ [x1, y1, x2, y2]"""
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+    denom = area_a + area_b - inter
+    return inter / denom if denom > 0 else 0.0
+
+
+def cross_region_nms(detections, iou_thresh=0.5):
+    """class-aware NMS ข้าม region: ตัด detection ที่ซ้ำกันเพราะกรอบ metal ทับกัน
+    หรือเพราะ fallback ตรวจทั้งภาพซ้อนกับกรอบ metal.
+    detection แต่ละตัวต้องมี key 'bbox_xyxy_global' (พิกัดในระบบภาพเต็ม) และ 'confidence'.
+    คืน list ที่รอด เรียงตาม confidence มาก->น้อย"""
+    order = sorted(detections, key=lambda d: d["confidence"], reverse=True)
+    kept = []
+    for d in order:
+        if any(d["class"] == k["class"]
+               and _iou_xyxy(d["bbox_xyxy_global"], k["bbox_xyxy_global"]) > iou_thresh
+               for k in kept):
+            continue
+        kept.append(d)
+    return kept
+
+
 def process_image(image_path, stage1_model, stage2_model, output_dir, conf, device,
-                  min_metal_ratio=0.05):
+                  min_metal_ratio=0.05, nms_iou=0.5):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     filename = Path(image_path).stem
@@ -279,11 +311,32 @@ def process_image(image_path, stage1_model, stage2_model, output_dir, conf, devi
         out_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         return summary
 
-    annotated = image.copy()
+    # ----- Pass 1: ตรวจตำหนิทุกบริเวณ แปลง bbox เป็นพิกัดภาพเต็ม -----
+    region_dets = []
     for i, (x, y, w, h) in enumerate(boxes):
         crop = image[y:y + h, x:x + w]
         print(f"Stage 2: ตรวจตำหนิบริเวณ {i + 1}/{len(boxes)}...")
-        detections = run_stage2(stage2_model, crop, conf, device)
+        dets = run_stage2(stage2_model, crop, conf, device)
+        for d in dets:
+            cx1, cy1, cx2, cy2 = d["bbox_xyxy_crop"]
+            d["region_id"] = i
+            d["bbox_xyxy_global"] = [
+                round(cx1 + x, 1), round(cy1 + y, 1),
+                round(cx2 + x, 1), round(cy2 + y, 1),
+            ]
+        region_dets.append(dets)
+
+    # ----- Cross-region NMS: ตัด detection ซ้ำจากกรอบที่ทับกัน / fallback ทั้งภาพ -----
+    flat = [d for dets in region_dets for d in dets]
+    kept_ids = {id(d) for d in cross_region_nms(flat, iou_thresh=nms_iou)}
+    n_removed = len(flat) - len(kept_ids)
+    if n_removed:
+        print(f"  ตัด detection ซ้ำข้ามบริเวณ {n_removed} จุด (cross-region NMS)")
+
+    # ----- Pass 2: วาดผล + สรุป เฉพาะ detection ที่รอด NMS -----
+    annotated = image.copy()
+    for i, (x, y, w, h) in enumerate(boxes):
+        detections = [d for d in region_dets[i] if id(d) in kept_ids]
 
         cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
         if detections:
@@ -330,6 +383,8 @@ def main():
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     parser.add_argument("--min-metal-ratio", type=float, default=0.05,
                         help="ถ้า Stage 1 เจอเหล็กน้อยกว่านี้ ให้ตรวจทั้งภาพเพิ่ม (fallback)")
+    parser.add_argument("--nms-iou", type=float, default=0.5,
+                        help="IoU threshold ของ cross-region NMS (ตัด detection ซ้ำข้ามบริเวณ)")
     args = parser.parse_args()
 
     device = resolve_device(args.device)
@@ -337,7 +392,7 @@ def main():
 
     if args.image:
         process_image(args.image, s1, s2, args.output_dir, args.conf, device,
-                      args.min_metal_ratio)
+                      args.min_metal_ratio, args.nms_iou)
     else:
         images = list(iter_images(args.folder))
         if not images:
@@ -347,7 +402,7 @@ def main():
         all_summaries = []
         for img in images:
             s = process_image(img, s1, s2, args.output_dir, args.conf, device,
-                              args.min_metal_ratio)
+                              args.min_metal_ratio, args.nms_iou)
             if s:
                 all_summaries.append(s)
         index_path = Path(args.output_dir) / "_index.json"

@@ -1,0 +1,8 @@
+# เหมือน merged_dataset/data.yaml แต่ train ชี้ไปไฟล์ list ที่ทำ class-balanced oversampling แล้ว
+# สร้างไฟล์ list ด้วย: python make_oversampled_list.py
+path: C:/Users/Lenovo/steel-defect-detection/merged_dataset
+train: train_oversampled.txt
+val: valid/images
+test: test/images
+nc: 8
+names: ['crazing', 'inclusion', 'patches', 'pitted_surface', 'rolled-in_scale', 'scratches', 'rust', 'crack']
