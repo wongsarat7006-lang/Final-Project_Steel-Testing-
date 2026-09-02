@@ -17,10 +17,6 @@ from pathlib import Path
 from collections import Counter
 
 BASE_DIR = Path(__file__).resolve().parent
-DS_DIR = BASE_DIR / "merged_dataset"
-IMG_DIR = DS_DIR / "train" / "images"
-LBL_DIR = DS_DIR / "train" / "labels"
-OUT_TXT = DS_DIR / "train_oversampled.txt"
 
 NAMES = ["crazing", "inclusion", "patches", "pitted_surface",
          "rolled-in_scale", "scratches", "rust", "crack"]
@@ -52,19 +48,28 @@ def classes_in(label_path: Path) -> set[int]:
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--dataset", default="merged_dataset",
+                    help="ชื่อโฟลเดอร์ dataset (เช่น merged_dataset หรือ merged_dataset_gray)")
     ap.add_argument("--show", action="store_true", help="แสดงสถิติอย่างเดียว ไม่เขียนไฟล์")
     args = ap.parse_args()
 
-    imgs = sorted(IMG_DIR.glob("*.jpg"))
+    ds_dir = Path(args.dataset)
+    if not ds_dir.is_absolute():
+        ds_dir = BASE_DIR / ds_dir
+    img_dir = ds_dir / "train" / "images"
+    lbl_dir = ds_dir / "train" / "labels"
+    out_txt = ds_dir / "train_oversampled.txt"
+
+    imgs = sorted(img_dir.glob("*.jpg"))
     if not imgs:
-        raise SystemExit(f"ไม่พบรูปใน {IMG_DIR}")
+        raise SystemExit(f"ไม่พบรูปใน {img_dir}")
 
     lines: list[str] = []
     before, after = Counter(), Counter()
     dup_imgs = 0
 
     for img in imgs:
-        lbl = LBL_DIR / (img.stem + ".txt")
+        lbl = lbl_dir / (img.stem + ".txt")
         cls = classes_in(lbl)
         rep = max((CLASS_MULT.get(c, 1) for c in cls), default=1)
         for c in cls:
@@ -85,9 +90,23 @@ def main():
     if args.show:
         return
 
-    OUT_TXT.write_text("\n".join(lines) + "\n")
-    print(f"\nเขียนแล้ว: {OUT_TXT}")
-    print("ต่อไป: python train.py --recipe texture --data data_oversampled.yaml --name train-balanced --epochs 120")
+    out_txt.write_text("\n".join(lines) + "\n")
+
+    # เขียน data_oversampled.yaml คู่กันไว้ในโฟลเดอร์ dataset นั้น (train ชี้ไฟล์ list)
+    yaml_path = ds_dir / "data_oversampled.yaml"
+    yaml_path.write_text(
+        f"# train ชี้ list ที่ oversample แล้ว (สร้างด้วย make_oversampled_list.py --dataset {args.dataset})\n"
+        f"path: {str(ds_dir.resolve()).replace(chr(92), '/')}\n"
+        f"train: train_oversampled.txt\n"
+        f"val: valid/images\n"
+        f"test: test/images\n"
+        f"nc: 8\n"
+        f"names: {NAMES}\n"
+    )
+    print(f"\nเขียนแล้ว: {out_txt}")
+    print(f"           {yaml_path}")
+    print(f"ต่อไป: python train.py --recipe texture --data {yaml_path.relative_to(BASE_DIR)} "
+          f"--model yolo11s.pt --name train-gray-s --epochs 120 --batch 6 --patience 40")
 
 
 if __name__ == "__main__":
