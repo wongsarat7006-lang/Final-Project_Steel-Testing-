@@ -171,7 +171,7 @@ def main():
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     parser.add_argument("--weights", default=None,
                         help="path ของ Stage 2 .pt (default: ตัวใน pipeline.py = train-clean/best.pt)")
-    parser.add_argument("--out", default=str(BASE_DIR / "evaluation_results.json"))
+    parser.add_argument("--out", default=str(BASE_DIR / "results" / "stage2_latest.json"))
     args = parser.parse_args()
 
     if args.weights:
@@ -189,6 +189,7 @@ def main():
     if args.mode in ("pipeline", "both"):
         report["pipeline"] = eval_pipeline(args.images, args.labels, device, args.conf)
 
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nบันทึกรายงานที่: {args.out}")
 

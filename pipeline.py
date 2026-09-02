@@ -434,7 +434,17 @@ def main():
                         help="IoU threshold ของ cross-region NMS (ตัด detection ซ้ำข้ามบริเวณ)")
     parser.add_argument("--no-class-conf", action="store_true",
                         help="ไม่ใช้ per-class threshold จาก thresholds.json (ใช้ --conf ค่าเดียว)")
+    parser.add_argument("--weights", default=None,
+                        help="path ของ Stage 2 .pt (default: STAGE2_MODEL_PATH ในไฟล์นี้)")
     args = parser.parse_args()
+
+    if args.weights:
+        global STAGE2_MODEL_PATH
+        w = Path(args.weights)
+        if not w.is_file():
+            raise SystemExit(f"ไม่พบไฟล์ weights: {w}")
+        STAGE2_MODEL_PATH = w
+        print(f"ใช้ Stage 2 weights: {w}")
 
     device = resolve_device(args.device)
     s1, s2 = load_models(device)

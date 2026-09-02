@@ -95,7 +95,7 @@
 |---|---|
 | Stage 2 train-balanced | ✅ mAP50 0.763 / R 0.753 — `runs/detect/train-balanced/weights/best.pt` (pipeline ใช้ตัวนี้แล้ว) |
 | Ablation B (aug/oversampling) | ✅ README + `figures/confusion_compare.png` |
-| `evaluate_stage1.py` | ✅ รันเต็ม 416 ภาพ → `stage1_results.json` |
+| `evaluate_stage1.py` | ✅ รันเต็ม 416 ภาพ → `results/stage1_dms46_test.json` |
 | cross-region NMS ใน `pipeline.py` | ✅ |
 | `real_test/` | ⏳ ต้องเก็บภาพเอง (ดู `NEXT_STEPS.md` ข้อ 3) |
 | Ablation Stage 1 (`evaluate_real.py`) | ⏳ รอ `real_test/` |

@@ -14,7 +14,7 @@ cd C:\Users\Lenovo\steel-defect-detection
 ## ✅ ขั้น 0 — เสร็จแล้ว (ผมทำให้)
 
 - cross-region NMS ใน `pipeline.py` (+ flag `--nms-iou`)
-- `evaluate_stage1.py` — รันเต็ม 416 ภาพแล้ว → `stage1_results.json`
+- `evaluate_stage1.py` — รันเต็ม 416 ภาพแล้ว → `results/stage1_dms46_test.json`
   (fallback 78%, gt_area_kept 16%, 208 ms/ภาพ GPU) → README หัวข้อ "Stage 1 metric เชิงตัวเลข"
 - **รวมตรรกะ fallback เป็นฟังก์ชันเดียว** `pipeline.build_regions()` — ใช้ร่วมกันโดย
   `pipeline.py` / `evaluate.py` / `evaluate_real.py` / `app.py` (เดิม copy กัน 4 ที่ + drift)
@@ -63,17 +63,24 @@ python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yam
 ### 1.3 วัดผล + หา per-class threshold (~10 นาที)
 
 ```powershell
-# mAP50 / mAP50-95 ต่อคลาส บน test  -> evaluation_results.json
-python evaluate.py --mode stage2 --weights runs/detect/train-gray-s/weights/best.pt --data merged_dataset_gray/data.yaml --out evaluation_results_gray_s.json
+# mAP50 / mAP50-95 ต่อคลาส บน test  -> results/stage2_train-gray-s.json
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-s/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-s.json
 
 # per-class confidence threshold จาก val  -> thresholds.json (pipeline/app จะใช้เอง)
 python tune_thresholds.py --weights runs/detect/train-gray-s/weights/best.pt --data merged_dataset_gray/data.yaml
 
-# อัปเดตให้ pipeline.py ใช้โมเดลใหม่: แก้ STAGE2_MODEL_PATH ใน pipeline.py -> train-gray-s/weights/best.pt
+# ใช้โมเดลใหม่กับ pipeline: python pipeline.py --weights runs/detect/train-gray-s/weights/best.pt ...
+#   หรือแก้ STAGE2_MODEL_PATH ใน pipeline.py ให้เป็น default
 ```
 
-**ส่งกลับมา:** `evaluation_results_gray_s.json` + `thresholds.json` + เลข mAP จาก console
+> เทียบให้ยุติธรรม: วัด train-clean / train-balanced ใหม่บน **test label ชุดเดียวกัน** ด้วย
+> `python evaluate.py --mode stage2 --weights runs/detect/train-clean/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-clean.json` (และ train-balanced)
+> — ตัวเลขเดิมใน README วัดก่อน `fix_labels.py` เทียบตรงไม่ได้
+
+**ส่งกลับมา:** `results/stage2_train-gray-s.json` + `thresholds.json` + เลข mAP จาก console
 → เติมตารางเทียบใน README + รัน `make_figures.py`
+
+เช็ค regression ก่อนส่ง: `python test_smoke.py`
 
 ---
 
@@ -144,6 +151,6 @@ python evaluate_real.py            # ทำทั้ง pipeline + baseline แ�
 
 | จากขั้น | ไฟล์ | ผมจะทำต่อ |
 |---|---|---|
-| 1 | `evaluation_results_gray_s.json` + `thresholds.json` + เลข mAP | เติมตารางเทียบใน README (Tier 1/2), รัน make_figures |
+| 1 | `results/stage2_train-gray-s.json` + `thresholds.json` + เลข mAP | เติมตารางเทียบใน README (Tier 1/2), รัน make_figures |
 | 3 | `real_test_results.json` | เติมตาราง Pipeline vs Baseline, confusion เทียบ |
 | 4 | คำตอบ 3 ข้อ | เขียนบทสรุป + ปรับ Limitations / ablation section |

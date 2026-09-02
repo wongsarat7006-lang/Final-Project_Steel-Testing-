@@ -19,7 +19,7 @@
 วิธีใช้:
     python evaluate_stage1.py
     python evaluate_stage1.py --dir merged_dataset/valid --device cpu
-    python evaluate_stage1.py --dir merged_dataset/test --limit 100 --out stage1_results.json
+    python evaluate_stage1.py --dir merged_dataset/test --limit 100 --out results/stage1_dms46_test.json
 """
 import argparse
 import json
@@ -119,7 +119,7 @@ def main():
     ap.add_argument("--min-metal-ratio", type=float, default=0.05,
                     help="เกณฑ์ fallback เดียวกับ pipeline.py")
     ap.add_argument("--limit", type=int, default=0, help="จำกัดจำนวนภาพ (0 = ทั้งหมด)")
-    ap.add_argument("--out", default=str(BASE_DIR / "stage1_results.json"))
+    ap.add_argument("--out", default=str(BASE_DIR / "results" / "stage1_latest.json"))
     args = ap.parse_args()
 
     root = Path(args.dir)
@@ -187,6 +187,7 @@ def main():
         print(f"  • gt_area_kept {agg['gt_area_kept_mean']:.1%} : Stage 1 เก็บพื้นที่ตำหนิไว้เกือบครบ ไม่กระทบ recall")
     print(f"  • ต้นทุนเวลา Stage 1 = {agg['stage1_ms_mean']} ms/ภาพ (median {agg['stage1_ms_median']})")
 
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(
         json.dumps({"aggregate": agg, "per_image": per_image}, ensure_ascii=False, indent=2),
         encoding="utf-8",

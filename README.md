@@ -49,11 +49,13 @@ steel-defect-detection/
 ├── make_oversampled_list.py class-balanced oversampling (มี --dataset) → <ds>/train_oversampled.txt
 ├── tune_thresholds.py       [accuracy] หา per-class confidence จาก val → thresholds.json
 ├── make_figures.py          สร้างรูปประกอบรายงานลง figures/
+├── test_smoke.py            smoke test — รัน pipeline 1 ภาพ + เช็คโครง output (กัน regression)
 ├── app.py                   Prototype UI (Gradio)
 ├── prepare_data.md          ขั้นตอนเตรียม dataset ตั้งแต่ต้น (reproducibility)
 ├── data.yaml                config 6 คลาส NEU เดิม
 ├── data_oversampled.yaml    config 8 คลาส, train ชี้ไฟล์ oversampled list
 ├── thresholds.json          per-class conf (มีก็ใช้อัตโนมัติใน pipeline/app/evaluate_real)
+├── results/                 ผล eval ที่เก็บไว้ (JSON) — ดู results/README.md
 ├── merged_dataset/          8 คลาส — labels_raw/ = label ก่อน fix_labels.py
 │   ├── data.yaml            config 8 คลาส  ← ใช้เทรน baseline
 │   └── {train,valid,test}/{images,labels}/
@@ -103,9 +105,11 @@ python pipeline.py --image test_images/steel-plate3.jpg
 # ทั้งโฟลเดอร์
 python pipeline.py --folder test_images --output_dir pipeline_results
 
-# ปรับ threshold / บังคับใช้ CPU
+# ปรับ threshold / บังคับใช้ CPU / เลือกโมเดล Stage 2
 python pipeline.py --image a.jpg --conf 0.35 --device cpu
+python pipeline.py --image a.jpg --weights runs/detect/train-gray-s/weights/best.pt
 ```
+ถ้ามี `thresholds.json` (จาก `tune_thresholds.py`) pipeline จะใช้ per-class conf อัตโนมัติ — ปิดด้วย `--no-class-conf`
 
 ได้ผลลัพธ์เป็น `*_result.jpg` (ภาพ + กรอบ + ป้ายไทย) และ `*_result.json` (รายละเอียดทุก detection)
 โหมด `--folder` สร้าง `_index.json` สรุปทั้งชุด
@@ -124,14 +128,15 @@ python train.py --model yolo11s.pt --epochs 100 --batch 8 --name train-s
 python train.py --resume
 ```
 
-เทรนเสร็จ weights อยู่ที่ `runs/detect/<name>/weights/best.pt` — ถ้าเปลี่ยนชื่อ run
-ให้แก้ `STAGE2_MODEL_PATH` ใน `pipeline.py` ให้ชี้ตรง
+เทรนเสร็จ weights อยู่ที่ `runs/detect/<name>/weights/best.pt` — ใช้กับ pipeline ได้ทันที
+ด้วย `python pipeline.py --weights <path>` หรือแก้ `STAGE2_MODEL_PATH` ใน `pipeline.py` ให้เป็นค่าเริ่มต้น
 
 ### 3. วัดผล
 
 ```bash
 # บน test split (NEU/Rust/Crack)
-python evaluate.py --mode stage2    # YOLO Stage 2: mAP50 / mAP50-95 ต่อคลาส  → evaluation_results.json
+python evaluate.py --mode stage2 --weights runs/detect/<run>/weights/best.pt \
+                   --out results/stage2_<run>.json     # mAP50 / mAP50-95 ต่อคลาส
 python evaluate.py --mode pipeline  # end-to-end image-level P/R/F1
 
 # บนภาพเหล็กถ่ายจริง (ต้องสร้าง real_test/ ก่อน — ดู prepare_data.md ข้อ 6)
@@ -139,8 +144,9 @@ python evaluate_real.py             # เทียบ pipeline (มี Stage 1) 
 python evaluate_real.py --mode pipeline --conf 0.35
 
 # วัด Stage 1 (DMS46) เชิงตัวเลข — detection rate / coverage / ตัดตำหนิทิ้งไหม / เวลา
-python evaluate_stage1.py --dir merged_dataset/test    # → stage1_results.json
+python evaluate_stage1.py --dir merged_dataset/test --out results/stage1_dms46_test.json
 ```
+ผล eval ที่เก็บไว้อยู่ใน `results/` (ดู `results/README.md`)
 
 ### 4. เทรนโมเดลปรับปรุง (แก้คลาสที่อ่อน)
 
@@ -155,7 +161,7 @@ python evaluate.py --mode stage2                         # วัดผลให
 
 ```bash
 python make_figures.py --runs train-clean train-balanced \
-       --evals "train-clean:evaluation_results.json" "train-balanced:eval_balanced.json"
+       --evals "train-clean:results/stage2_train-clean.json" "train-balanced:results/stage2_train-balanced.json"
 ```
 ได้ `figures/{training_curves,per_class_map,class_distribution,confusion_compare}.png`
 
