@@ -113,6 +113,17 @@ def load_models(device: str):
     print("  Stage 2 (Defect Detection / YOLO11)...")
     stage2_model = YOLO(str(STAGE2_MODEL_PATH))
 
+    # ตรวจว่าโมเดล Stage 2 เทรนบน grayscale หรือไม่ (จาก data yaml ที่ใช้เทรน)
+    # ถ้าใช่ ต้องแปลง crop เป็น grayscale ก่อนตรวจ ไม่งั้น train/serve skew
+    try:
+        train_data = str((getattr(stage2_model, "ckpt", None) or {})
+                         .get("train_args", {}).get("data", ""))
+    except Exception:
+        train_data = ""
+    stage2_model._steel_gray = "gray" in train_data.lower()
+    if stage2_model._steel_gray:
+        print("  (Stage 2 เทรนบน grayscale → จะแปลง crop เป็น grayscale ก่อนตรวจ)")
+
     print("โหลดโมเดลครบแล้ว\n")
     return stage1_model, stage2_model
 
@@ -264,6 +275,9 @@ def run_stage2(stage2_model, crop_image, conf: float, device: str, augment: bool
     class_conf={..} : กรอง detection ด้วย threshold รายคลาส (predict ที่ค่าต่ำสุดก่อน แล้วค่อยกรอง)"""
     if crop_image.size == 0 or crop_image.shape[0] < 8 or crop_image.shape[1] < 8:
         return []
+    if getattr(stage2_model, "_steel_gray", False):
+        g = cv2.cvtColor(crop_image, cv2.COLOR_BGR2GRAY)
+        crop_image = cv2.cvtColor(g, cv2.COLOR_GRAY2BGR)
     base_conf = min([conf, *class_conf.values()]) if class_conf else conf
     results = stage2_model.predict(
         source=crop_image, conf=base_conf, device=device, augment=augment, verbose=False
