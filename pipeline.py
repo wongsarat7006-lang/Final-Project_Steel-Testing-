@@ -27,6 +27,7 @@ from ultralytics import YOLO
 BASE_DIR = Path(__file__).resolve().parent
 STAGE1_MODEL_PATH = BASE_DIR / "DMS46_v1.pt"
 STAGE2_MODEL_PATH = BASE_DIR / "runs" / "detect" / "train-balanced" / "weights" / "best.pt"
+THRESHOLDS_PATH = BASE_DIR / "thresholds.json"  # per-class conf (ถ้ามี) — สร้างด้วย tune_thresholds.py
 
 # DMS46 ทำนายเป็น index 0-45 (เรียงจาก taxonomy 46 ชนิดที่โมเดลรองรับ)
 # วัสดุ "Metal" คือ taxonomy id 26 ซึ่งตรงกับ output index 22 ของโมเดล
@@ -220,21 +221,64 @@ def mask_to_boxes(mask, min_area=500, max_area_ratio=0.98, min_fill_ratio=0.10):
     return boxes
 
 
-def run_stage2(stage2_model, crop_image, conf: float, device: str):
+def build_regions(mask, image_shape, min_metal_ratio=0.05):
+    """หา region เหล็กจาก mask + เพิ่มกรอบทั้งภาพเป็น fallback เมื่อ Stage 1
+    เจอเหล็กน้อยกว่า min_metal_ratio หรือไม่เจอเลย (DMS46 ทำงานไม่ดีกับ
+    เหล็กทาสี/สนิมหนัก/ภาพ close-up texture — ดู evaluate_stage1.py)
+
+    คืน (boxes, meta):
+      boxes : list[(x, y, w, h)] พิกัดในระบบภาพเต็ม (มีกรอบทั้งภาพต่อท้ายถ้า fallback)
+      meta  : dict สรุปว่า Stage 1 ทำงานอย่างไรกับภาพนี้
+    ใช้ร่วมกันโดย pipeline.py / evaluate.py / evaluate_real.py / app.py
+    เพื่อให้ fallback เหมือนกันทุกที่"""
+    boxes = mask_to_boxes(mask)
+    img_h, img_w = image_shape[:2]
+    metal_ratio = cv2.countNonZero(mask) / (mask.shape[0] * mask.shape[1])
+    metal_found = len(boxes) > 0
+    fallback = (not boxes) or metal_ratio < min_metal_ratio
+    if fallback:
+        boxes = boxes + [(0, 0, img_w, img_h)]
+    return boxes, {
+        "metal_found": metal_found,
+        "metal_ratio": round(metal_ratio, 4),
+        "fallback_full_image": fallback,
+        "n_regions": len(boxes),
+    }
+
+
+def load_class_conf(path=None):
+    """โหลด per-class confidence threshold จาก thresholds.json (สร้างด้วย tune_thresholds.py)
+    คืน dict {class_name: conf} หรือ None ถ้าไม่มีไฟล์"""
+    path = Path(path) if path else THRESHOLDS_PATH
+    if not path.exists():
+        return None
+    obj = json.loads(path.read_text(encoding="utf-8"))
+    return {k: float(v["conf"]) for k, v in obj.get("per_class", {}).items()}
+
+
+def run_stage2(stage2_model, crop_image, conf: float, device: str, augment: bool = False,
+               class_conf: dict | None = None):
     """รัน YOLO ตรวจตำหนิบน crop, คืน list ของ detection เรียงตาม confidence มาก->น้อย
-    (bbox เป็นพิกัดของ crop — ผู้เรียกต้องบวก offset ของ region เองถ้าจะเทียบข้ามบริเวณ)"""
+    (bbox เป็นพิกัดของ crop — ผู้เรียกต้องบวก offset ของ region เองถ้าจะเทียบข้ามบริเวณ)
+    augment=True    : test-time augmentation ของ ultralytics (ช้าลง ~2-3x, recall ดีขึ้นเล็กน้อย)
+    class_conf={..} : กรอง detection ด้วย threshold รายคลาส (predict ที่ค่าต่ำสุดก่อน แล้วค่อยกรอง)"""
     if crop_image.size == 0 or crop_image.shape[0] < 8 or crop_image.shape[1] < 8:
         return []
+    base_conf = min([conf, *class_conf.values()]) if class_conf else conf
     results = stage2_model.predict(
-        source=crop_image, conf=conf, device=device, verbose=False
+        source=crop_image, conf=base_conf, device=device, augment=augment, verbose=False
     )
     detections = []
     for r in results:
         for box in r.boxes:
             cls_id = int(box.cls[0])
+            name = DEFECT_CLASSES[cls_id]
+            score = float(box.conf[0])
+            if class_conf and score < class_conf.get(name, conf):
+                continue
             detections.append({
-                "class": DEFECT_CLASSES[cls_id],
-                "confidence": float(box.conf[0]),
+                "class": name,
+                "confidence": score,
                 "bbox_xywh": [round(v, 1) for v in box.xywh[0].tolist()],
                 "bbox_xyxy_crop": [round(v, 1) for v in box.xyxy[0].tolist()],
             })
@@ -273,7 +317,7 @@ def cross_region_nms(detections, iou_thresh=0.5):
 
 
 def process_image(image_path, stage1_model, stage2_model, output_dir, conf, device,
-                  min_metal_ratio=0.05, nms_iou=0.5):
+                  min_metal_ratio=0.05, nms_iou=0.5, class_conf=None):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     filename = Path(image_path).stem
@@ -286,37 +330,26 @@ def process_image(image_path, stage1_model, stage2_model, output_dir, conf, devi
     print(f"===== {filename} =====")
     print("Stage 1: หาตำแหน่งเหล็ก...")
     mask = run_stage1(stage1_model, image, device)
-    boxes = mask_to_boxes(mask)
-    metal_ratio = cv2.countNonZero(mask) / (mask.shape[0] * mask.shape[1])
-    print(f"  พบเหล็ก {len(boxes)} บริเวณ (ครอบคลุม {metal_ratio:.0%} ของภาพ)")
-
-    # DMS ทำงานได้ไม่ดีกับเหล็กทาสี/เป็นสนิมหนัก ถ้าเจอเหล็กน้อยมากให้ตรวจทั้งภาพเผื่อไว้
-    fallback_full = metal_ratio < min_metal_ratio
-    if fallback_full:
-        h, w = image.shape[:2]
-        boxes = boxes + [(0, 0, w, h)]
+    boxes, meta = build_regions(mask, image.shape, min_metal_ratio)
+    n_metal = meta["n_regions"] - (1 if meta["fallback_full_image"] else 0)
+    print(f"  พบเหล็ก {n_metal} บริเวณ (ครอบคลุม {meta['metal_ratio']:.0%} ของภาพ)")
+    if meta["fallback_full_image"]:
         print(f"  เหล็กครอบคลุมน้อยกว่า {min_metal_ratio:.0%} — เพิ่มการตรวจทั้งภาพ (fallback)")
 
     summary = {
         "image": str(image_path),
         "metal_regions": len(boxes),
-        "metal_area_ratio": round(metal_ratio, 4),
-        "fallback_full_image": fallback_full,
+        "metal_area_ratio": meta["metal_ratio"],
+        "fallback_full_image": meta["fallback_full_image"],
         "regions": [],
     }
-
-    if not boxes:
-        print("  ไม่พบเหล็กในภาพนี้ — ข้าม Stage 2\n")
-        out_json = output_dir / f"{filename}_result.json"
-        out_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        return summary
 
     # ----- Pass 1: ตรวจตำหนิทุกบริเวณ แปลง bbox เป็นพิกัดภาพเต็ม -----
     region_dets = []
     for i, (x, y, w, h) in enumerate(boxes):
         crop = image[y:y + h, x:x + w]
         print(f"Stage 2: ตรวจตำหนิบริเวณ {i + 1}/{len(boxes)}...")
-        dets = run_stage2(stage2_model, crop, conf, device)
+        dets = run_stage2(stage2_model, crop, conf, device, class_conf=class_conf)
         for d in dets:
             cx1, cy1, cx2, cy2 = d["bbox_xyxy_crop"]
             d["region_id"] = i
@@ -385,14 +418,21 @@ def main():
                         help="ถ้า Stage 1 เจอเหล็กน้อยกว่านี้ ให้ตรวจทั้งภาพเพิ่ม (fallback)")
     parser.add_argument("--nms-iou", type=float, default=0.5,
                         help="IoU threshold ของ cross-region NMS (ตัด detection ซ้ำข้ามบริเวณ)")
+    parser.add_argument("--no-class-conf", action="store_true",
+                        help="ไม่ใช้ per-class threshold จาก thresholds.json (ใช้ --conf ค่าเดียว)")
     args = parser.parse_args()
 
     device = resolve_device(args.device)
     s1, s2 = load_models(device)
 
+    class_conf = None if args.no_class_conf else load_class_conf()
+    if class_conf:
+        print(f"ใช้ per-class conf จาก {THRESHOLDS_PATH.name}: "
+              + ", ".join(f"{k}={v}" for k, v in class_conf.items()) + "\n")
+
     if args.image:
         process_image(args.image, s1, s2, args.output_dir, args.conf, device,
-                      args.min_metal_ratio, args.nms_iou)
+                      args.min_metal_ratio, args.nms_iou, class_conf)
     else:
         images = list(iter_images(args.folder))
         if not images:
@@ -402,7 +442,7 @@ def main():
         all_summaries = []
         for img in images:
             s = process_image(img, s1, s2, args.output_dir, args.conf, device,
-                              args.min_metal_ratio, args.nms_iou)
+                              args.min_metal_ratio, args.nms_iou, class_conf)
             if s:
                 all_summaries.append(s)
         index_path = Path(args.output_dir) / "_index.json"

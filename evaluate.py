@@ -95,12 +95,10 @@ def eval_pipeline(images_dir, labels_dir, device, conf):
         n_images += 1
 
         mask = P.run_stage1(s1, image, device)
-        boxes = P.mask_to_boxes(mask)
-        if boxes:
+        # ใช้ fallback แบบเดียวกับ pipeline.py (เพิ่มกรอบทั้งภาพเมื่อ metal_ratio < 0.05)
+        boxes, meta = P.build_regions(mask, image.shape)
+        if meta["metal_found"]:
             n_metal_found += 1
-        else:
-            # ไม่เจอเหล็ก -> ใช้ทั้งภาพเป็น region เดียว (เพื่อยังตรวจตำหนิได้)
-            boxes = [(0, 0, image.shape[1], image.shape[0])]
 
         pred_classes = set()
         for (x, y, w, h) in boxes:

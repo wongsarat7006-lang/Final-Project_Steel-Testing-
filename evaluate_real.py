@@ -63,34 +63,23 @@ def load_ground_truth(csv_path: Path):
     return gt
 
 
-def predict_pipeline(s1, s2, image, conf, device):
+def predict_pipeline(s1, s2, image, conf, device, class_conf=None):
     """คืน (set(class_id), meta)  ผ่าน Stage 1 + Stage 2"""
     mask = P.run_stage1(s1, image, device)
-    boxes = P.mask_to_boxes(mask)
-    metal_ratio = cv2.countNonZero(mask) / (mask.shape[0] * mask.shape[1])
-    metal_found = len(boxes) > 0
-    fallback = metal_ratio < 0.05
-    if not boxes or fallback:
-        h, w = image.shape[:2]
-        boxes = boxes + [(0, 0, w, h)]
+    boxes, meta = P.build_regions(mask, image.shape)
 
     preds = set()
     for (x, y, w, h) in boxes:
         crop = image[y:y + h, x:x + w]
-        for d in P.run_stage2(s2, crop, conf, device):
+        for d in P.run_stage2(s2, crop, conf, device, class_conf=class_conf):
             preds.add(NAME_TO_ID[d["class"]])
-    return preds, {
-        "metal_found": metal_found,
-        "metal_ratio": round(metal_ratio, 4),
-        "fallback_full_image": fallback,
-        "n_regions": len(boxes),
-    }
+    return preds, meta
 
 
-def predict_baseline(s2, image, conf, device):
+def predict_baseline(s2, image, conf, device, class_conf=None):
     """คืน set(class_id)  จาก YOLO บนภาพเต็ม"""
     preds = set()
-    for d in P.run_stage2(s2, image, conf, device):
+    for d in P.run_stage2(s2, image, conf, device, class_conf=class_conf):
         preds.add(NAME_TO_ID[d["class"]])
     return preds
 
@@ -157,6 +146,8 @@ def main():
     ap.add_argument("--mode", default="both", choices=["pipeline", "baseline", "both"])
     ap.add_argument("--conf", type=float, default=0.4)
     ap.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
+    ap.add_argument("--no-class-conf", action="store_true",
+                    help="ไม่ใช้ per-class threshold จาก thresholds.json")
     ap.add_argument("--out", default=str(BASE_DIR / "real_test_results.json"))
     args = ap.parse_args()
 
@@ -172,6 +163,12 @@ def main():
         )
 
     gt_map = load_ground_truth(csv_path)
+    if not gt_map:
+        raise SystemExit(
+            f"{csv_path} มีแต่ header ยังไม่มีข้อมูล\n"
+            f"  ใส่ภาพลง {img_dir}\\ แล้วเติมบรรทัด filename,classes ลง labels.csv\n"
+            f"  ดูตัวอย่างใน real_test/README.md"
+        )
     images = []
     for fn in gt_map:
         p = img_dir / fn
@@ -180,7 +177,7 @@ def main():
             continue
         images.append(p)
     if not images:
-        raise SystemExit("ไม่พบไฟล์ภาพที่ตรงกับ labels.csv เลย")
+        raise SystemExit("ไม่พบไฟล์ภาพที่ตรงกับ labels.csv เลย (ชื่อไฟล์ใน labels.csv ไม่ตรงกับไฟล์ใน images/)")
 
     n_gt_defect = sum(1 for v in gt_map.values() if v)
     print(f"ชุดทดสอบ: {len(images)} ภาพ  ({n_gt_defect} ภาพมีตำหนิ, "
@@ -190,7 +187,12 @@ def main():
     s1, s2 = P.load_models(device)
     gt_used = {p.name: gt_map[p.name] for p in images}
 
-    report = {"device": device, "conf": args.conf, "n_images": len(images)}
+    class_conf = None if args.no_class_conf else P.load_class_conf()
+    if class_conf:
+        print("ใช้ per-class conf: " + ", ".join(f"{k}={v}" for k, v in class_conf.items()))
+
+    report = {"device": device, "conf": args.conf, "n_images": len(images),
+              "per_class_conf": class_conf}
 
     if args.mode in ("pipeline", "both"):
         pred_map = {}
@@ -198,7 +200,7 @@ def main():
         t0 = time.perf_counter()
         for p in images:
             im = cv2.imread(str(p))
-            preds, meta = predict_pipeline(s1, s2, im, args.conf, device)
+            preds, meta = predict_pipeline(s1, s2, im, args.conf, device, class_conf)
             pred_map[p.name] = preds
             meta_all.append(meta)
         dt = time.perf_counter() - t0
@@ -220,7 +222,7 @@ def main():
         t0 = time.perf_counter()
         for p in images:
             im = cv2.imread(str(p))
-            pred_map[p.name] = predict_baseline(s2, im, args.conf, device)
+            pred_map[p.name] = predict_baseline(s2, im, args.conf, device, class_conf)
         dt = time.perf_counter() - t0
         summ = score(gt_used, pred_map)
         extra = {"sec_per_image": round(dt / len(images), 3)}

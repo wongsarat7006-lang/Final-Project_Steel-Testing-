@@ -44,15 +44,20 @@ steel-defect-detection/
 ├── evaluate_stage1.py       วัด Stage 1 (DMS46) เชิงตัวเลข: detection rate / coverage / เวลา
 ├── merge_datasets.py        รวม NEU + Rust + Crack เป็น 8 คลาส
 ├── resplit_dataset.py       แบ่ง train/valid/test ใหม่แบบ stratified (ทุก split ครบ 8 คลาส)
-├── make_oversampled_list.py class-balanced oversampling → merged_dataset/train_oversampled.txt
+├── fix_labels.py            [accuracy] รวมกล่อง crazing/rolled-in เป็น 1/ภาพ + ตัดกล่องเสีย
+├── make_grayscale_dataset.py [accuracy] merged_dataset/ → merged_dataset_gray/ (ตัด shortcut สี)
+├── make_oversampled_list.py class-balanced oversampling (มี --dataset) → <ds>/train_oversampled.txt
+├── tune_thresholds.py       [accuracy] หา per-class confidence จาก val → thresholds.json
 ├── make_figures.py          สร้างรูปประกอบรายงานลง figures/
 ├── app.py                   Prototype UI (Gradio)
 ├── prepare_data.md          ขั้นตอนเตรียม dataset ตั้งแต่ต้น (reproducibility)
 ├── data.yaml                config 6 คลาส NEU เดิม
-├── data_oversampled.yaml    config 8 คลาส, train ชี้ไฟล์ oversampled list  ← ใช้เทรน train-balanced
-├── merged_dataset/
+├── data_oversampled.yaml    config 8 คลาส, train ชี้ไฟล์ oversampled list
+├── thresholds.json          per-class conf (มีก็ใช้อัตโนมัติใน pipeline/app/evaluate_real)
+├── merged_dataset/          8 คลาส — labels_raw/ = label ก่อน fix_labels.py
 │   ├── data.yaml            config 8 คลาส  ← ใช้เทรน baseline
 │   └── {train,valid,test}/{images,labels}/
+├── merged_dataset_gray/     เวอร์ชัน grayscale (สร้างจาก make_grayscale_dataset.py)
 ├── train/ valid/ test/      NEU ดิบจาก Roboflow (source ของ merge_datasets.py — ห้ามลบ)
 ├── rust_dataset/  crack_dataset/            dataset ดิบก่อน merge
 ├── real_test/               ★ ต้องสร้างเอง — ภาพเหล็กถ่ายจริง + labels.csv (ดู prepare_data.md ข้อ 6)
@@ -161,6 +166,12 @@ pip install gradio
 python app.py
 # เปิด http://127.0.0.1:7860 — อัปโหลดภาพ, เลื่อน confidence, กดตรวจสอบ
 ```
+
+- โหลดโมเดลครั้งเดียวตอนเริ่ม (ครั้งแรกอาจใช้เวลา ~10–20 วิ) แล้วพร้อมรับภาพ
+- แสดง 3 ส่วน: สรุปผล (ชนิดตำหนิ + เน้นความเสี่ยงสูง), ภาพผลลัพธ์ (กรอบเหล็ก + กรอบตำหนิ),
+  ภาพ Stage 1 (พื้นที่ที่เป็นเหล็ก / fallback ทั้งภาพ)
+- ใช้ fallback + cross-region NMS แบบเดียวกับ `pipeline.py` (`pipeline.build_regions`)
+- ติ๊ก "ตรวจละเอียด" = test-time augmentation (ช้าลง ~2–3x, recall ดีขึ้นเล็กน้อย)
 
 ---
 

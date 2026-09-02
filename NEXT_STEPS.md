@@ -16,59 +16,64 @@ cd C:\Users\Lenovo\steel-defect-detection
 - cross-region NMS ใน `pipeline.py` (+ flag `--nms-iou`)
 - `evaluate_stage1.py` — รันเต็ม 416 ภาพแล้ว → `stage1_results.json`
   (fallback 78%, gt_area_kept 16%, 208 ms/ภาพ GPU) → README หัวข้อ "Stage 1 metric เชิงตัวเลข"
+- **รวมตรรกะ fallback เป็นฟังก์ชันเดียว** `pipeline.build_regions()` — ใช้ร่วมกันโดย
+  `pipeline.py` / `evaluate.py` / `evaluate_real.py` / `app.py` (เดิม copy กัน 4 ที่ + drift)
+- **`app.py` เพิ่ม fallback + cross-region NMS** — เดิม UI ตอบ "ไม่พบเหล็ก → ไม่ตรวจ"
+  เมื่อ DMS46 เจอเหล็กน้อย (เกิดบ่อยมากกับภาพจริง) ตอนนี้ตรวจทั้งภาพเผื่อเหมือน `pipeline.py`
+- **`evaluate.py --mode pipeline`** ใช้ fallback แบบเดียวกับ pipeline จริงแล้ว (เดิม fallback เฉพาะตอนไม่เจอกรอบเลย)
+- **สร้างโครง `real_test/`** ไว้แล้ว (`images/`, `labels.csv` header, `SOURCES.md`, `README.md`) — แค่ใส่ภาพ + เติม labels.csv
+- **สคริปต์ปรับความแม่นยำ Tier 1+2** เขียน + ทดสอบแล้ว (ดูขั้น 1 ข้างล่าง):
+  `fix_labels.py`, `make_grayscale_dataset.py`, `make_oversampled_list.py --dataset`,
+  `tune_thresholds.py` + per-class conf ต่อสายเข้า `pipeline.py`/`app.py`/`evaluate_real.py` แล้ว
 
 ---
 
-## ขั้น 1 — เทรน `train-balanced` (งานหลัก, ~3–4 ชม.)
+## ขั้น 1 — ปรับความแม่นยำ (Tier 1 + 2)
 
-**ก่อนเริ่ม:** ปิดโปรแกรมกินการ์ดจอ (Chrome เยอะ ๆ, เกม, โปรแกรมตัดต่อ) — GPU มี 6GB
-ถ้าเทรนแล้ว OOM ให้ลด `--batch` ลงเป็น 6 หรือ 4
+หลักฐาน (`train-balanced/results.csv` + label geometry):
+- val mAP50 พีค **epoch 62 (0.80)** แล้วไหลลง → เทรนนานขึ้น/imgsz สูงขึ้น **ไม่ช่วย**
+- crazing/rolled-in_scale annotate เป็นกล่องย่อยมั่ว (เฉลี่ย 2–5 กล่อง) → mAP ตันที่ label noise
+- rust/scratches เกือบ 100% ส่วนหนึ่งเพราะโมเดลอ่าน "โทนสี" แยก NEU (เทา) vs rust/crack (สี)
 
-```powershell
-python train.py --recipe texture --data data_oversampled.yaml --name train-balanced --epochs 100 --batch 8 --patience 30
-```
-
-| อาร์กิวเมนต์ | ทำไม |
-|---|---|
-| `--recipe texture` | ลด mosaic/scale/rotate ที่ทำลาย texture ละเอียดของ crazing / rolled-in_scale |
-| `--data data_oversampled.yaml` | ใช้ train list ที่ oversample crazing ×3, pitted/rolled/scratches ×2 |
-| `--batch 8` | เพดานของการ์ด 6GB (desktop กินไปแล้ว ~1.5GB) |
-| `--patience 30` | หยุดเองถ้า val ไม่ดีขึ้น 30 epoch |
-
-**ระหว่างเทรน** — ดูใน console ทุก epoch:
-- คอลัมน์ `box_loss / cls_loss / dfl_loss` ควรค่อย ๆ ลด
-- `mAP50` ของ val ควรไต่ขึ้นแล้วนิ่ง ~epoch 60–80
-
-**เทรนเสร็จ** ผลอยู่ที่ `runs\detect\train-balanced\`
-- `weights\best.pt` ← โมเดลที่ดีที่สุด
-- `results.png`, `confusion_matrix_normalized.png` ← ดูว่า crazing / rolled-in_scale ดีขึ้นไหม
-- ตัวเลขสรุปบรรทัดสุดท้ายของ console = mAP50 / mAP50-95 บน val
-
-**ถ้าเครื่องดับ / เผลอปิดกลางคัน** เทรนต่อได้:
-```powershell
-python train.py --resume --name train-balanced
-```
-
-### (ทางเลือก) เทรน yolo11s เทียบ — ทำก็ต่อเมื่อขั้น 1 หลักเสร็จแล้ว
-```powershell
-python train.py --recipe texture --data data_oversampled.yaml --name train-balanced-s --model yolo11s.pt --epochs 100 --batch 4 --patience 30
-```
-
----
-
-## ขั้น 2 — วัดผลโมเดลใหม่ (หลังขั้น 1 เสร็จ, ~5 นาที)
+### 1.1 เตรียม dataset ใหม่ (Tier 1 — ~10 นาที)
 
 ```powershell
-# mAP50 / mAP50-95 ต่อคลาส บน test split  → เขียนทับ evaluation_results.json
-python evaluate.py --mode stage2 --weights runs/detect/train-balanced/weights/best.pt
-
-# (ถ้าเทรน yolo11s ด้วย) วัดตัวนั้นแยก ตั้งชื่อ out ไม่ให้ทับกัน
-python evaluate.py --mode stage2 --weights runs/detect/train-balanced-s/weights/best.pt --out eval_balanced_s.json
+python merge_datasets.py            # (ถ้ายังไม่ได้ทำ)
+python resplit_dataset.py           # (ถ้ายังไม่ได้ทำ)
+python fix_labels.py                # รวมกล่อง crazing/rolled-in เป็น 1 กล่อง/ภาพ + ตัดกล่องเสีย
+python make_grayscale_dataset.py    # -> merged_dataset_gray/  (ตัด shortcut เรื่องสี)
+python make_oversampled_list.py --dataset merged_dataset_gray
 ```
-> flag `--weights` เพิ่มให้แล้ว (เดิม `evaluate.py` ชี้ `train-clean/best.pt` แบบ hard-code)
 
-**ส่งกลับมาให้ผม:** เนื้อหา `evaluation_results.json` + เลข mAP จาก console
-→ ผมเติมตารางเปรียบเทียบใน README (แถว train-balanced) + รัน `make_figures.py` ให้
+> `fix_labels.py` สำรองของเดิมไว้ที่ `merged_dataset/<split>/labels_raw/` — คืนค่าได้ด้วย `python fix_labels.py --restore`
+
+### 1.2 เทรน yolo11s บน dataset ใหม่ (Tier 2 — ~3–4 ชม.)
+
+**ก่อนเริ่ม:** ปิดโปรแกรมกินการ์ดจอ — GPU 6GB. OOM ให้ลด `--batch` เป็น 4
+
+```powershell
+python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
+                --model yolo11s.pt --name train-gray-s --epochs 120 --batch 6 --patience 40
+```
+`yolo11s.pt` จะโหลดเองอัตโนมัติครั้งแรก. เครื่องดับกลางคัน: `python train.py --resume --name train-gray-s`
+
+> อยากแยกผลของแต่ละ fix: เทรน `--data merged_dataset/data_oversampled.yaml` (ไม่ gray) เป็น ablation ด้วย
+> — ต้องรัน `make_oversampled_list.py --dataset merged_dataset` ก่อน
+
+### 1.3 วัดผล + หา per-class threshold (~10 นาที)
+
+```powershell
+# mAP50 / mAP50-95 ต่อคลาส บน test  -> evaluation_results.json
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-s/weights/best.pt --data merged_dataset_gray/data.yaml --out evaluation_results_gray_s.json
+
+# per-class confidence threshold จาก val  -> thresholds.json (pipeline/app จะใช้เอง)
+python tune_thresholds.py --weights runs/detect/train-gray-s/weights/best.pt --data merged_dataset_gray/data.yaml
+
+# อัปเดตให้ pipeline.py ใช้โมเดลใหม่: แก้ STAGE2_MODEL_PATH ใน pipeline.py -> train-gray-s/weights/best.pt
+```
+
+**ส่งกลับมา:** `evaluation_results_gray_s.json` + `thresholds.json` + เลข mAP จาก console
+→ เติมตารางเทียบใน README + รัน `make_figures.py`
 
 ---
 
@@ -76,10 +81,8 @@ python evaluate.py --mode stage2 --weights runs/detect/train-balanced-s/weights/
 
 **นี่คือสิ่งเดียวที่พิสูจน์ได้ว่า Stage 1 (DMS46) มีประโยชน์จริงหรือควรตัดทิ้ง**
 
-### 3.1 สร้างโฟลเดอร์
-```powershell
-mkdir real_test\images
-```
+### 3.1 โฟลเดอร์
+`real_test\images\` + `real_test\labels.csv` (header) มีให้แล้ว — ดู `real_test\README.md`
 
 ### 3.2 หาภาพ 40–60 ภาพ ใส่ `real_test\images\`
 เงื่อนไขภาพ:
@@ -141,6 +144,6 @@ python evaluate_real.py            # ทำทั้ง pipeline + baseline แ�
 
 | จากขั้น | ไฟล์ | ผมจะทำต่อ |
 |---|---|---|
-| 2 | `evaluation_results.json` + เลข mAP | เติมตาราง train-balanced ใน README, รัน make_figures |
+| 1 | `evaluation_results_gray_s.json` + `thresholds.json` + เลข mAP | เติมตารางเทียบใน README (Tier 1/2), รัน make_figures |
 | 3 | `real_test_results.json` | เติมตาราง Pipeline vs Baseline, confusion เทียบ |
 | 4 | คำตอบ 3 ข้อ | เขียนบทสรุป + ปรับ Limitations / ablation section |

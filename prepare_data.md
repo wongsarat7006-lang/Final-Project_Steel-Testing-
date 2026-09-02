@@ -81,16 +81,31 @@ python resplit_dataset.py
 
 > มี label ไฟล์ที่มีหลายคลาสในภาพเดียว ~97 ไฟล์ (ส่วนใหญ่จาก NEU-DET ที่ภาพหนึ่งมีตำหนิ 2 ชนิด) — ปล่อยไว้ตามจริง
 
+## 3.5 ทำความสะอาด label + ตัด domain shortcut (accuracy — Tier 1)
+
+```bash
+python fix_labels.py                # รวมกล่อง crazing(0)/rolled-in_scale(4) เป็น 1 กล่อง/ภาพ + ตัดกล่องเสีย
+python make_grayscale_dataset.py    # merged_dataset/ -> merged_dataset_gray/ (grayscale 3ch)
+```
+
+- **`fix_labels.py`** — NEU-DET annotate crazing/rolled-in_scale เป็นกล่องย่อยกระจาย (เฉลี่ย 2–5 กล่อง,
+  สัดส่วนไม่คงที่) ทำให้ detector เรียนไม่ได้ → mAP50 ตันที่ ~0.39. ทั้งสองคลาสเป็น texture ทั้ง patch
+  จึงรวมเป็น union box เดียว. ตัดกล่อง degenerate (w/h < 0.004 หรือ area < 0.0005) ด้วย (~19 กล่องใน crack).
+  ต้นฉบับสำรองที่ `merged_dataset/<split>/labels_raw/` — คืนด้วย `python fix_labels.py --restore`
+- **`make_grayscale_dataset.py`** — rust/scratches แม่นเกือบ 100% ส่วนหนึ่งเพราะโมเดลแยก
+  "NEU (เทา) vs rust/crack (สี)" จากโทนสี ไม่ใช่ลักษณะตำหนิ → บนภาพจริงจะพัง.
+  เทรนบน grayscale บังคับให้เรียนจากรูปร่าง/พื้นผิว
+
 ## 4. Class-balanced oversampling (แก้คลาสที่โมเดลมองข้าม)
 
 จาก confusion matrix พบว่า crazing 64% และ rolled-in_scale 34% ถูกทำนายเป็น background
 (missed detection ล้วน ไม่ใช่สับสนข้ามคลาส) สาเหตุ = class imbalance + mosaic ย่อ texture เต็มภาพ
 
 ```bash
-python make_oversampled_list.py
+python make_oversampled_list.py --dataset merged_dataset_gray   # หรือ merged_dataset ถ้าไม่ทำ grayscale
 ```
 
-สร้าง `merged_dataset/train_oversampled.txt` (ทำซ้ำ path ในไฟล์ list ไม่ก็อปไฟล์จริง):
+สร้าง `<dataset>/train_oversampled.txt` + `<dataset>/data_oversampled.yaml` (ทำซ้ำ path ในไฟล์ list ไม่ก็อปไฟล์จริง):
 
 | คลาส | ตัวคูณ | images (หลัง) |
 |---|---|---|
@@ -108,12 +123,28 @@ python make_oversampled_list.py
 # baseline (augmentation เดิม, dataset สมดุลปกติ)
 python train.py --data merged_dataset/data.yaml --name train-clean --epochs 100 --batch 8
 
-# ปรับปรุง: oversampling + texture-aware augmentation
+# train-balanced เดิม (yolo11n): oversampling + texture-aware augmentation
 python train.py --recipe texture --data data_oversampled.yaml --name train-balanced --epochs 100 --batch 8 --patience 30
+
+# accuracy (Tier 1+2): label สะอาด + grayscale + yolo11s
+python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml \
+                --model yolo11s.pt --name train-gray-s --epochs 120 --batch 6 --patience 40
 ```
 
 recipe `texture`: `mosaic=0.3, close_mosaic=20, scale=0.2, degrees=5, flipud=0.5, erasing=0.2, cos_lr=True`
 — ลด augmentation ที่ทำลาย texture ละเอียดเต็มภาพของ crazing / rolled-in_scale
+
+## 5.5 per-class confidence threshold (accuracy — Tier 2)
+
+pipeline ใช้ conf ค่าเดียวทุกคลาส แต่จุดทำงานที่ดีต่างกันมาก (rust มั่นใจสูงตลอด, crazing ยิงเบา)
+
+```bash
+python tune_thresholds.py --weights runs/detect/train-gray-s/weights/best.pt \
+                          --data merged_dataset_gray/data.yaml
+```
+
+เขียน `thresholds.json` — `pipeline.py` / `app.py` / `evaluate_real.py` โหลดใช้อัตโนมัติถ้ามีไฟล์
+(ปิดด้วย `--no-class-conf`)
 
 ## 6. ชุดทดสอบภาพจริง (สำหรับวัด pipeline end-to-end)
 
