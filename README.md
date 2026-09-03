@@ -5,7 +5,7 @@
 | Stage | หน้าที่ | โมเดล |
 |-------|---------|-------|
 | **1. Metal Localization** | หา region ในภาพที่เป็นวัสดุ "เหล็ก/โลหะ" แล้ว crop ออกมา | [DMS46](https://github.com/apple/ml-dms-dataset) (Apple Dense Material Segmentation, pre-trained, TorchScript) |
-| **2. Defect Detection** | ตรวจชนิดตำหนิบนภาพที่ crop มา 8 ประเภท | YOLO11n (เทรนเองบน dataset รวม) |
+| **2. Defect Detection** | ตรวจชนิดตำหนิบนภาพที่ crop มา 8 ประเภท | YOLO11s (เทรนเองบน dataset รวม, grayscale — `train-gray-s`) |
 
 ```
 ภาพถ่าย ──▶ [Stage 1: DMS46] ──▶ mask พื้นที่เหล็ก ──▶ crop
@@ -260,17 +260,73 @@ python app.py
 - คลาสที่แข็งอยู่แล้ว (patches, scratches) ถอยเล็กน้อย ~0.02–0.03 จากการลด mosaic/scale
 
 **สรุป:** สำหรับงานตรวจตำหนิ (พลาดตำหนิ = แย่กว่าเตือนเกิน) recall ที่สมดุลขึ้นคุ้มกว่า mAP ที่ขยับนิด
-→ ใช้ `train-balanced` เป็นโมเดลหลัก. ถ้าจะดันต่อ: crazing ต้องการ imgsz สูงขึ้น (texture ละเอียด)
-หรือข้อมูลจริงเพิ่ม ไม่ใช่แค่ oversample list
+→ train-balanced ดีกว่า train-clean. **ขั้นต่อไป (Tier 1+2) ดันได้อีกมาก — ดูหัวข้อ "Tier 1+2" ด้านล่าง**
+(โมเดลหลักปัจจุบัน = `train-gray-s`, `pipeline.py` ชี้ตัวนี้แล้ว)
 
 ### ตารางเปรียบเทียบ
 
 | Config | mAP50 | mAP50-95 | R | crazing mAP50 | rolled-in_scale mAP50 |
 |---|---|---|---|---|---|
 | train-2 (dataset ปนเปื้อน, test split เก่า) | 0.56 | – | – | – | – |
-| **train-clean** (dataset สะอาด, aug default) | 0.750 | 0.448 | 0.703 | 0.423 | 0.585 |
-| **train-balanced** (oversample + recipe texture) | **0.763** | 0.449 | **0.753** | 0.392 | **0.668** |
-| train-balanced-s (yolo11s) | _?_ | _?_ | _?_ | _?_ | _?_ |
+| train-clean (dataset สะอาด, aug default) | 0.750 | 0.448 | 0.703 | 0.423 | 0.585 |
+| train-balanced (oversample + recipe texture) | 0.763 | 0.449 | 0.753 | 0.392 | 0.668 |
+| **train-gray-s** (Tier 1+2 — ดูหัวข้อถัดไป) | **0.853** | **0.537** | **0.809** | **0.870** | **0.860** |
+
+> ⚠️ **train-gray-s วัดคนละ protocol**: บน `merged_dataset_gray` test (ภาพ grayscale) และ label ของ
+> crazing/rolled-in_scale ถูกรวมเป็น 1 กล่อง/ภาพ (`fix_labels.py`) — mAP ของ 2 คลาสนี้จึงวัด
+> "หา region ตำหนิ" ไม่ใช่ "ระบุแต่ละ patch" เทียบตัวเลขตรง ๆ กับ 2 แถวบนไม่ได้
+
+### Tier 1+2 — label สะอาด + grayscale + yolo11s (`runs/detect/train-gray-s`)
+
+3 การเปลี่ยนพร้อมกัน: (1) `fix_labels.py` รวมกล่อง crazing/rolled-in_scale เป็น union ต่อภาพ +
+ตัดกล่อง degenerate  (2) `make_grayscale_dataset.py` เทรน/วัดบน grayscale (ตัด shortcut เรื่องสี)
+(3) yolo11n → **yolo11s**
+
+**train-gray-s** — 120 epochs, texture recipe + oversampling, วัดบน `merged_dataset_gray` test (568 instance):
+
+| | mAP50 | mAP50-95 | P | R |
+|---|---|---|---|---|
+| **รวมทุกคลาส** | **0.853** | **0.537** | 0.836 | 0.809 |
+
+val mAP50 = 0.854 ≈ test 0.853 → ไม่ overfit
+
+| class | mAP50 | mAP50-95 | P | R |
+|-------|------:|---------:|---:|---:|
+| rust | 0.995 | 0.974 | 0.981 | 1.000 |
+| scratches | 0.964 | 0.526 | 0.921 | 0.947 |
+| patches | 0.900 | 0.514 | 0.800 | 0.851 |
+| crazing | 0.870 | 0.437 | 0.818 | 0.800 |
+| rolled-in_scale | 0.860 | 0.565 | 0.833 | 0.832 |
+| pitted_surface | 0.795 | 0.499 | 0.858 | 0.721 |
+| inclusion | 0.769 | 0.373 | 0.680 | 0.660 |
+| crack | 0.669 | 0.411 | 0.799 | 0.659 |
+
+**อ่านผล:**
+- คลาสที่ไม่ได้แตะ label (patches/scratches/pitted/rust/inclusion) → เสมอตัวถึงดีขึ้นเล็กน้อย
+  → **grayscale ไม่ทำให้เสีย** แถมตัด color shortcut
+- crazing recall 0.42 → **0.80**, rolled-in_scale recall → 0.83 — จับตำหนิได้จริงขึ้นมาก
+  (ส่วน mAP ที่พุ่งแรง มาจากการเปลี่ยนรูปแบบ label ด้วย — ดู ⚠️ ข้างบน)
+- **crack ยังอ่อนสุด** (mAP50 0.669, recall 0.66) — grayscale อาจลด contrast ของรอยแตกบนภาพสี
+
+**หลักฐาน color shortcut** (วัดโมเดลที่เทรนบน**สี** บน test **เทา**):
+`train-balanced` rust mAP50 **0.995 → 0.187 (recall → 0.00)** — โมเดลสีหา rust จากโทนสีเป็นหลัก
+พอเป็น grayscale แทบหาไม่เจอ → เป็นเหตุผลที่ต้องเทรนบน grayscale
+
+**ยังขาดสำหรับ ablation ที่แยกผลชัด:** retrain yolo11n บน `merged_dataset_gray` (label สะอาด + gray, ไม่เปลี่ยน model size)
+→ แยกผลของ "label+gray" ออกจาก "11n→11s". ตอนนี้ทั้ง 3 อย่างรวมอยู่ใน train-gray-s
+
+### Per-class confidence threshold (`tune_thresholds.py` → `thresholds.json`)
+
+จาก F1-vs-confidence curve บน val — pipeline/app/evaluate_real โหลดใช้อัตโนมัติ
+
+| | conf ที่เลือก | หมายเหตุ |
+|---|---|---|
+| rust | 0.90 | มั่นใจสูงตลอด ตั้งสูงได้ |
+| crazing | 0.59 | |
+| patches / inclusion | 0.47 / 0.45 | |
+| crack / pitted / scratches / rolled-in | 0.33–0.36 | ยิงเบา ตั้งต่ำเพื่อ recall |
+
+**macro-F1 บน val: 0.814 (conf เดียว 0.40) → 0.843 (per-class)**  (+0.029)
 
 ### Pipeline end-to-end vs Baseline
 

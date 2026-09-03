@@ -89,15 +89,19 @@
 
 ---
 
-## สถานะปัจจุบัน (2026-09-02)
+## สถานะปัจจุบัน (2026-09-03)
 
 | งาน | สถานะ |
 |---|---|
-| Stage 2 train-balanced | ✅ mAP50 0.763 / R 0.753 — `runs/detect/train-balanced/weights/best.pt` (pipeline ใช้ตัวนี้แล้ว) |
+| Stage 2 train-balanced (yolo11n) | ✅ mAP50 0.763 / R 0.753 — baseline |
+| **Stage 2 train-gray-s (yolo11s + Tier 1+2)** | ✅ **mAP50 0.853 / mAP50-95 0.537 / R 0.809** — `runs/detect/train-gray-s` (pipeline ชี้ตัวนี้), val 0.854 ≈ test → ไม่ overfit |
+| Tier 1: `fix_labels.py` (merge crazing/rolled-in) + `make_grayscale_dataset.py` | ✅ |
+| Tier 2: `tune_thresholds.py` → macro-F1 val 0.814 → 0.843 | ✅ `thresholds.json` |
 | Ablation B (aug/oversampling) | ✅ README + `figures/confusion_compare.png` |
 | `evaluate_stage1.py` | ✅ รันเต็ม 416 ภาพ → `results/stage1_dms46_test.json` |
 | cross-region NMS ใน `pipeline.py` | ✅ |
+| Ablation แยกผล label+gray vs 11n→11s | ⏳ ต้อง retrain yolo11n บน merged_dataset_gray |
 | `real_test/` | ⏳ ต้องเก็บภาพเอง (ดู `NEXT_STEPS.md` ข้อ 3) |
 | Ablation Stage 1 (`evaluate_real.py`) | ⏳ รอ `real_test/` |
-| Baseline C (yolo11s) | ⏳ ถ้าจะทำ |
+| multi-seed / CI, leakage check, เทียบเปเปอร์ NEU-DET | ⏳ |
 | เคลียร์ baseline กับอาจารย์ | ⏳ |

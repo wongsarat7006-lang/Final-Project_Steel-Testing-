@@ -26,7 +26,7 @@ from ultralytics import YOLO
 # ===== Path (อ้างอิงจากตำแหน่งไฟล์นี้ ไม่ผูกกับ working directory) =====
 BASE_DIR = Path(__file__).resolve().parent
 STAGE1_MODEL_PATH = BASE_DIR / "DMS46_v1.pt"
-STAGE2_MODEL_PATH = BASE_DIR / "runs" / "detect" / "train-balanced" / "weights" / "best.pt"
+STAGE2_MODEL_PATH = BASE_DIR / "runs" / "detect" / "train-gray-s" / "weights" / "best.pt"
 THRESHOLDS_PATH = BASE_DIR / "thresholds.json"  # per-class conf (ถ้ามี) — สร้างด้วย tune_thresholds.py
 
 # DMS46 ทำนายเป็น index 0-45 (เรียงจาก taxonomy 46 ชนิดที่โมเดลรองรับ)

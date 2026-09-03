@@ -1,0 +1,66 @@
+{
+  "weights": "runs\\detect\\train-gray-s\\weights\\best.pt",
+  "data": "C:\\Users\\Lenovo\\steel-defect-detection\\merged_dataset_gray\\data.yaml",
+  "split": "val",
+  "compare_conf": 0.4,
+  "macro_f1_opt": 0.8426,
+  "macro_f1_at_compare": 0.8143,
+  "per_class": {
+    "crazing": {
+      "conf": 0.591,
+      "f1_opt": 0.8362,
+      "f1_at_compare": 0.7807,
+      "precision_opt": 0.9195,
+      "recall_opt": 0.7667
+    },
+    "inclusion": {
+      "conf": 0.446,
+      "f1_opt": 0.7847,
+      "f1_at_compare": 0.7709,
+      "precision_opt": 0.9022,
+      "recall_opt": 0.6942
+    },
+    "patches": {
+      "conf": 0.466,
+      "f1_opt": 0.8901,
+      "f1_at_compare": 0.8757,
+      "precision_opt": 0.9277,
+      "recall_opt": 0.8554
+    },
+    "pitted_surface": {
+      "conf": 0.332,
+      "f1_opt": 0.8056,
+      "f1_at_compare": 0.7926,
+      "precision_opt": 0.9062,
+      "recall_opt": 0.725
+    },
+    "rolled-in_scale": {
+      "conf": 0.316,
+      "f1_opt": 0.7498,
+      "f1_at_compare": 0.6906,
+      "precision_opt": 0.7058,
+      "recall_opt": 0.7996
+    },
+    "scratches": {
+      "conf": 0.33,
+      "f1_opt": 0.9444,
+      "f1_at_compare": 0.9418,
+      "precision_opt": 0.9622,
+      "recall_opt": 0.9273
+    },
+    "rust": {
+      "conf": 0.901,
+      "f1_opt": 1.0,
+      "f1_at_compare": 0.9965,
+      "precision_opt": 1.0,
+      "recall_opt": 1.0
+    },
+    "crack": {
+      "conf": 0.359,
+      "f1_opt": 0.7296,
+      "f1_at_compare": 0.6659,
+      "precision_opt": 0.8251,
+      "recall_opt": 0.6538
+    }
+  }
+}

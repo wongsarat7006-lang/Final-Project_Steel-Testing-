@@ -1,70 +1,70 @@
 {
-  "device": "cpu",
+  "device": "cuda",
   "stage2_weights": "runs\\detect\\train-balanced\\weights\\best.pt",
   "stage2": {
     "split": "test",
     "overall": {
-      "mAP50": 0.7625,
-      "mAP50-95": 0.449,
-      "precision": 0.7747,
-      "recall": 0.7531
+      "mAP50": 0.5445,
+      "mAP50-95": 0.2949,
+      "precision": 0.6599,
+      "recall": 0.5607
     },
     "per_class": [
       {
         "class": "crazing",
-        "precision": 0.5273,
-        "recall": 0.4184,
-        "mAP50": 0.3924,
-        "mAP50-95": 0.1235
+        "precision": 0.0992,
+        "recall": 0.1667,
+        "mAP50": 0.0553,
+        "mAP50-95": 0.0102
       },
       {
         "class": "inclusion",
-        "precision": 0.7835,
-        "recall": 0.7512,
-        "mAP50": 0.7783,
-        "mAP50-95": 0.3636
+        "precision": 0.7701,
+        "recall": 0.7264,
+        "mAP50": 0.7747,
+        "mAP50-95": 0.361
       },
       {
         "class": "patches",
-        "precision": 0.8056,
+        "precision": 0.8068,
         "recall": 0.8736,
-        "mAP50": 0.863,
-        "mAP50-95": 0.502
+        "mAP50": 0.8604,
+        "mAP50-95": 0.5
       },
       {
         "class": "pitted_surface",
-        "precision": 0.8235,
+        "precision": 0.8204,
         "recall": 0.7907,
-        "mAP50": 0.786,
-        "mAP50-95": 0.4986
+        "mAP50": 0.7807,
+        "mAP50-95": 0.5013
       },
       {
         "class": "rolled-in_scale",
-        "precision": 0.6602,
-        "recall": 0.6001,
-        "mAP50": 0.6677,
-        "mAP50-95": 0.2903
+        "precision": 0.1637,
+        "recall": 0.3333,
+        "mAP50": 0.0955,
+        "mAP50-95": 0.0239
       },
       {
         "class": "scratches",
-        "precision": 0.8005,
+        "precision": 0.8106,
         "recall": 0.9388,
-        "mAP50": 0.9286,
-        "mAP50-95": 0.4567
+        "mAP50": 0.9278,
+        "mAP50-95": 0.457
       },
       {
         "class": "rust",
-        "precision": 0.9931,
-        "recall": 1.0,
-        "mAP50": 0.995,
-        "mAP50-95": 0.8901
+        "precision": 1.0,
+        "recall": 0.0,
+        "mAP50": 0.1869,
+        "mAP50-95": 0.0474
       },
       {
         "class": "crack",
-        "precision": 0.8041,
-        "recall": 0.6519,
-        "mAP50": 0.6894,
-        "mAP50-95": 0.4676
+        "precision": 0.8083,
+        "recall": 0.6561,
+        "mAP50": 0.6747,
+        "mAP50-95": 0.4583
       }
     ]
   }

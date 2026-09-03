@@ -28,7 +28,24 @@ cd C:\Users\Lenovo\steel-defect-detection
 
 ---
 
-## ขั้น 1 — ปรับความแม่นยำ (Tier 1 + 2)
+## ✅ ขั้น 1 — ปรับความแม่นยำ (Tier 1 + 2) — เสร็จแล้ว 2026-09-03
+
+**ผล `train-gray-s`** (yolo11s, 120 ep, texture recipe, gray + label สะอาด):
+mAP50 **0.853** / mAP50-95 **0.537** / R 0.809 (val 0.854 ≈ test → ไม่ overfit)
+- crazing recall 0.42 → **0.80**, rolled-in_scale → 0.83
+- crack ยังอ่อนสุด (mAP50 0.669) — grayscale อาจลด contrast รอยแตก
+- `thresholds.json`: macro-F1 val 0.814 → **0.843**
+- `pipeline.py` ชี้ `train-gray-s` แล้ว, `results/stage2_*.json` × 3 + figures อัปเดตแล้ว
+- **หลักฐาน color shortcut:** train-balanced (เทรนสี) วัดบน test เทา → rust mAP 0.995 → **0.19 (R=0)**
+
+**ยังค้าง:** retrain yolo11n บน `merged_dataset_gray` เพื่อแยกผล "label+gray" ออกจาก "11n→11s"
+```powershell
+python make_oversampled_list.py --dataset merged_dataset      # ถ้ายังไม่มี
+python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml --name train-gray-n --epochs 120 --batch 8 --patience 40
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-n/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-n.json
+```
+
+<details><summary>วิธีทำเดิม (ทำไปแล้ว — เก็บไว้อ้างอิง)</summary>
 
 หลักฐาน (`train-balanced/results.csv` + label geometry):
 - val mAP50 พีค **epoch 62 (0.80)** แล้วไหลลง → เทรนนานขึ้น/imgsz สูงขึ้น **ไม่ช่วย**
@@ -77,10 +94,9 @@ python tune_thresholds.py --weights runs/detect/train-gray-s/weights/best.pt --d
 > `python evaluate.py --mode stage2 --weights runs/detect/train-clean/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-clean.json` (และ train-balanced)
 > — ตัวเลขเดิมใน README วัดก่อน `fix_labels.py` เทียบตรงไม่ได้
 
-**ส่งกลับมา:** `results/stage2_train-gray-s.json` + `thresholds.json` + เลข mAP จาก console
-→ เติมตารางเทียบใน README + รัน `make_figures.py`
+เช็ค regression: `python test_smoke.py`
 
-เช็ค regression ก่อนส่ง: `python test_smoke.py`
+</details>
 
 ---
 
