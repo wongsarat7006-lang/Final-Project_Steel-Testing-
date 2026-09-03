@@ -128,6 +128,76 @@ DATA_DICT = [
     ("results/stage2_*.json", "—", "overall{mAP50, mAP50-95, P, R}, per_class[]", "ผล evaluate.py --mode stage2"),
 ]
 
+SA = [
+    ("SA-01", "อินเทอร์เฟซ 2 ทาง: Web UI (Gradio, app.py) และ CLI (pipeline.py __main__) — ทั้งคู่เรียก pipeline core ตัวเดียวกัน"),
+    ("SA-02", "Pipeline Core (pipeline.py) เป็นตัวประสาน: โหลดโมเดล, เรียก Stage 1/2, ทำ NMS, กรอง threshold, วาดผล/บันทึก"),
+    ("SA-03", "Stage 1 — DMS46 (Apple Dense Material Segmentation, pre-trained TorchScript): resize ด้านยาว 512 + ImageNet normalize → label map 46 วัสดุ → เลือก index 22 (\"Metal\") → binary mask"),
+    ("SA-04", "Region extraction (mask_to_boxes): morphology + findContours + กรองด้วยพื้นที่/สัดส่วน + รวมกรอบที่อยู่ติดกัน → list ของ (x, y, w, h)"),
+    ("SA-05", "Fallback (build_regions): ถ้า metal_ratio < 0.05 หรือไม่พบกรอบ → เพิ่มกรอบ = ทั้งภาพ เพื่อไม่พลาดตำหนิ"),
+    ("SA-06", "Stage 2 — YOLO11s เทรนเองบน dataset รวม 8 คลาส (grayscale, run: train-gray-s) รันตรวจตำหนิบนแต่ละ region"),
+    ("SA-07", "Grayscale guard (run_stage2): ตรวจจาก checkpoint ว่าโมเดลเทรนบน grayscale หรือไม่ ถ้าใช่แปลง crop เป็น grayscale ก่อน predict (กัน train/serve skew)"),
+    ("SA-08", "Cross-region NMS (cross_region_nms): แปลง bbox เป็นพิกัดภาพเต็ม แล้วตัด detection ซ้ำข้าม region (คลาสเดียวกัน, IoU > 0.5)"),
+    ("SA-09", "Per-class threshold (load_class_conf): กรอง detection ที่ confidence ต่ำกว่าเกณฑ์รายคลาสจาก thresholds.json (ถ้ามี)"),
+    ("SA-10", "Output: วาดกรอบ + ป้ายไทย + ความเสี่ยง → UI (4 output) หรือไฟล์ *_result.jpg / *_result.json (CLI)"),
+    ("SA-11", "External: DMS46_v1.pt (Apple), Ultralytics YOLO runtime + yolo11s.pt, ระบบไฟล์ท้องถิ่น — ไม่มี API เครือข่าย"),
+    ("SA-12", "Deployment: เครื่องเดียว (Windows 11 + RTX 3050 6GB, Python 3.11 venv) — ไม่มี server / ฐานข้อมูล / cloud"),
+]
+
+DB = [
+    ("DB-01", "ไม่มี DBMS (RDBMS/NoSQL/ORM) — เป็น prototype เครื่องเดียว ประมวลผลต่อคำขอ ไม่มีสถานะร่วมหลายผู้ใช้"),
+    ("DB-02", "RESULT — ไฟล์ *_result.json ต่อภาพ: image (path), metal_regions, metal_area_ratio, fallback_full_image, regions[]"),
+    ("DB-03", "REGION — embedded ใน RESULT.regions[]: region_id (คีย์), box_xywh[4], detections[]"),
+    ("DB-04", "DETECTION — embedded ใน REGION.detections[]: class (→ DEFECT_CLASS), confidence, bbox_xywh, bbox_xyxy_crop, bbox_xyxy_global, region_id"),
+    ("DB-05", "DEFECT_CLASS — คงที่ในโค้ด (DEFECT_CLASSES + DEFECT_INFO): id 0–7, name, name_th, risk"),
+    ("DB-06", "DATASET_IMAGE — ไฟล์ภาพเทรน: filename (คีย์), split {train/valid/test}; width/height อ่านตอนโหลด ไม่เก็บ"),
+    ("DB-07", "LABEL_BOX — ไฟล์ <split>/labels/*.txt (YOLO): class_id, xc, yc, w, h (normalized) บรรทัดละกล่อง"),
+    ("DB-08", "REAL_TEST_LABEL — real_test/labels.csv: filename, classes (คั่นด้วย ; — ระดับภาพ) สำหรับ evaluate_real.py"),
+    ("DB-09", "ไฟล์ config/ผลการทดลอง: data.yaml, data_oversampled.yaml, thresholds.json, results/stage2_*.json, results/stage1_dms46_test.json, _index.json"),
+    ("DB-10", "ความสัมพันธ์: RESULT 1–N REGION ; REGION 1–N DETECTION ; DETECTION N–1 DEFECT_CLASS ; DATASET_IMAGE 1–N LABEL_BOX ; LABEL_BOX N–1 DEFECT_CLASS"),
+]
+
+UX = [
+    ("UX-01", "หน้าเดียว (Gradio gr.Blocks) ที่ http://127.0.0.1:7860 — ไม่มีล็อกอิน ไม่มีหลายหน้า"),
+    ("UX-02", "Flow เดียว: อัปโหลดภาพ → (ปรับ confidence / เปิดตรวจละเอียด ถ้าต้อง) → กด \"ตรวจสอบ\" → อ่านผล"),
+    ("UX-03", "Layout: แถวบน = 2 คอลัมน์ (ซ้าย input, ขวา output ข้อความ+ตาราง) ; แถวล่าง = ภาพผลลัพธ์ + ภาพ Stage 1"),
+    ("UX-04", "โหลดโมเดลครั้งเดียวตอนเปิดแอป (_ensure_models) — ไม่ค้างเงียบ ๆ ตอนกดปุ่มครั้งแรก ; มี gr.Progress ระหว่างประมวลผล"),
+    ("UX-05", "สรุปผล (verdict) เน้น \"ความเสี่ยง\" ก่อนชนิด — ไฮไลต์ตำหนิเสี่ยงสูง (rust, crack)"),
+    ("UX-06", "ตารางตำหนิเรียงตามความเสี่ยง (สูง→ต่ำ) แล้วตามความมั่นใจ — ผู้ใช้เห็นสิ่งสำคัญก่อน"),
+    ("UX-07", "แสดงภาพ Stage 1 (overlay เขียว = เหล็ก, ส้ม = fallback) ให้ผู้ใช้เข้าใจว่าระบบ \"มองเห็นเหล็กตรงไหน\""),
+    ("UX-08", "ข้อความ/ป้ายทั้งหมดเป็นภาษาไทย (วาดบนภาพผ่าน PIL + tahoma.ttf เพราะ cv2.putText ไม่รองรับไทย)"),
+    ("UX-09", "มี gr.Examples (test_images/) ให้กดลองได้ทันทีโดยไม่ต้องหาไฟล์"),
+    ("UX-10", "รองรับภาพหลายรูปแบบ (grayscale/RGBA) — แปลงให้ภายในไม่ให้ผู้ใช้ต้องจัดการเอง"),
+    ("UX-11", "ข้อความกำกับชัดเจนว่าเป็น prototype \"ผู้ช่วยคัดกรอง\" ไม่ใช่ระบบตัดสินขั้นสุดท้าย"),
+]
+
+UC = [
+    ("UC-01", "ผู้ใช้งาน — อัปโหลดภาพเหล็กเข้าระบบ"),
+    ("UC-02", "ผู้ใช้งาน — ปรับ confidence threshold / เปิดโหมดตรวจละเอียด"),
+    ("UC-03", "ผู้ใช้งาน — สั่งตรวจภาพ (ระบบรัน Stage 1 + Stage 2)  «include» UC-01"),
+    ("UC-04", "ผู้ใช้งาน — ดูผล: กรอบ + ชนิดตำหนิ + ระดับความเสี่ยง + ภาพ Stage 1  «include» UC-03"),
+    ("UC-05", "ผู้ใช้งาน — บันทึก/ส่งออกผล (ภาพ + JSON)"),
+    ("UC-06", "ผู้พัฒนา — เตรียม dataset (merge → resplit → fix_labels → grayscale → oversample)"),
+    ("UC-07", "ผู้พัฒนา — เทรนโมเดล Stage 2 (train.py)"),
+    ("UC-08", "ผู้พัฒนา — วัดผล mAP / F1 (evaluate.py)"),
+    ("UC-09", "ผู้พัฒนา — หา per-class confidence threshold (tune_thresholds.py)"),
+    ("UC-10", "ผู้พัฒนา — วัด Stage 1 เชิงตัวเลข / วัดกับภาพถ่ายจริง (evaluate_stage1.py, evaluate_real.py)"),
+    ("UC-11", "ผู้พัฒนา — สร้างรูป/เอกสารประกอบ (make_figures / make_diagrams_doc / make_uml_doc / make_design_doc)"),
+]
+
+FLOW = [
+    ("F-01", "อ่านภาพ (cv2.imread) ; ถ้าเปิดไม่ได้ → จบ"),
+    ("F-02", "Stage 1: run_stage1() → metal mask"),
+    ("F-03", "build_regions(mask, image.shape, min_metal_ratio) → boxes, meta"),
+    ("F-04", "ตัดสินใจ: metal_ratio < 0.05 หรือไม่พบกรอบ? → ใช่: boxes += (0,0,W,H) (fallback) / ไม่ใช่: ใช้ boxes เดิม"),
+    ("F-05", "Pass 1 — วนแต่ละ region: crop ภาพ"),
+    ("F-06", "run_stage2(): [ถ้าโมเดล grayscale → แปลง crop เป็น gray] · YOLO predict · กรอง score < class_conf[cls]"),
+    ("F-07", "แปลง bbox_xyxy_crop → bbox_xyxy_global (บวก offset ของ region)"),
+    ("F-08", "รวม detection ทุก region → cross_region_nms(flat, iou=0.5)"),
+    ("F-09", "Pass 2 — วนแต่ละ region: ตัดสินใจ มี detection ที่รอด NMS?"),
+    ("F-10", "   ใช่ → วาดกรอบเขียว + กรอบแดง + ป้ายไทย + เก็บลง rows[] / ไม่ → วาดกรอบเขียว + ป้าย \"เหล็ก #k ปกติ\""),
+    ("F-11", "CLI: เขียน *_result.jpg + *_result.json (โหมด --folder เพิ่ม _index.json) — UI: คืน (annotated, stage1_img, verdict, rows)"),
+]
+
 
 def build_docx():
     from docx import Document
@@ -174,6 +244,14 @@ def build_docx():
                     row.cells[i].width = Inches(w)
         return t
 
+    def items(pairs):
+        """แต่ละข้อ: (รหัส, ข้อความ) -> bullet ที่ขึ้นต้นด้วยรหัสตัวหนา"""
+        for code, txt in pairs:
+            p = doc.add_paragraph(style="List Bullet")
+            r = p.add_run(code + "  ")
+            r.bold = True
+            p.add_run(txt)
+
     # ---- ปก ----
     ti = doc.add_heading("เอกสารออกแบบระบบ (System Design Document)", 0)
     ti.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -199,11 +277,8 @@ def build_docx():
 
     # ---- 3. System Architecture ----
     h1("3. System Architecture")
-    doc.add_paragraph(
-        "สถาปัตยกรรม 2 ขั้น: Stage 1 (DMS46, pre-trained TorchScript) หาพื้นที่ที่เป็นโลหะ → "
-        "แปลงเป็น regions (+fallback ทั้งภาพเมื่อ metal_ratio < 0.05) → Stage 2 (YOLO11s เทรนเอง, grayscale) "
-        "ตรวจตำหนิบนแต่ละ region → cross-region NMS → กรอง per-class threshold → วาดผล + บันทึก. "
-        "ทำงานบนเครื่องเดียว ไม่มี backend service แยกและไม่มีฐานข้อมูล.")
+    doc.add_paragraph("องค์ประกอบสถาปัตยกรรม (แยกเป็นข้อ):")
+    items(SA)
     doc.add_heading("3.1 ภาพรวม 2-Stage", level=2)
     img("d1_architecture.png", 5.6)
     doc.add_heading("3.2 Stage 1 — DMS46 Metal Localization (ภายใน)", level=2)
@@ -219,36 +294,22 @@ def build_docx():
 
     # ---- 4. Database / Data Design ----
     h1("4. Database Design (Data Design)")
-    doc.add_paragraph(
-        "ระบบ ไม่มีฐานข้อมูล (ไม่มี RDBMS / NoSQL / ORM). เหตุผล: เป็น prototype รันในเครื่องเดียว, "
-        "ประมวลผลแบบ batch/ต่อคำขอ, ไม่มีผู้ใช้หลายคนหรือสถานะที่ต้อง persist ร่วมกัน. "
-        "ข้อมูลทั้งหมด persist เป็น ไฟล์ บนระบบไฟล์ท้องถิ่น. หัวข้อนี้จึงเป็น Conceptual Data Model + "
-        "พจนานุกรมข้อมูล (data dictionary) ของไฟล์เหล่านั้น.")
+    doc.add_paragraph("รายการข้อมูลที่ระบบเก็บ (แยกเป็นข้อ — ไม่มี DBMS, persist เป็นไฟล์ทั้งหมด):")
+    items(DB)
     doc.add_heading("4.1 Conceptual Data Model (ERD)", level=2)
     img("uml_5_erd.png", 6.5,
         "RESULT 1–N REGION 1–N DETECTION N–1 DEFECT_CLASS ; DATASET_IMAGE 1–N LABEL_BOX N–1 DEFECT_CLASS")
     doc.add_heading("4.2 Data Dictionary — ไฟล์และโครงสร้าง", level=2)
     table(["ไฟล์ / แหล่ง", "เอนทิตี", "ฟิลด์หลัก", "หมายเหตุ"], DATA_DICT,
           widths=[1.5, 1.1, 3.0, 1.4])
-    doc.add_heading("4.3 รูปแบบไฟล์", level=2)
-    for line in [
-        "• *_result.json — JSON ซ้อน (RESULT › regions[] › detections[]) เขียนโดย process_image()",
-        "• _index.json — array ของ RESULT ทั้งชุด (โหมด --folder)",
-        "• labels/*.txt — YOLO format: \"<class_id> <xc> <yc> <w> <h>\" (normalized) บรรทัดละ 1 กล่อง",
-        "• real_test/labels.csv — header \"filename,classes\" ; classes คั่นด้วย ; ; \"none\" = ไม่มีตำหนิ",
-        "• data.yaml / data_oversampled.yaml — config ของ Ultralytics (path, train/val/test, nc, names)",
-        "• thresholds.json, results/stage2_*.json, results/stage1_dms46_test.json — ผลการทดลอง (เก็บถาวร)",
-    ]:
-        doc.add_paragraph(line)
 
     # ---- 5. UI/UX Design ----
     h1("5. UI/UX Design")
-    doc.add_paragraph(
-        "UI เดียว: หน้าเว็บ Gradio (gr.Blocks) เปิดที่ http://127.0.0.1:7860 — ออกแบบให้ flow สั้นที่สุด "
-        "สำหรับพนักงานคัดกรอง: อัปโหลดภาพ → (ปรับ threshold ถ้าต้อง) → กด \"ตรวจสอบ\" → อ่านผล.")
+    doc.add_paragraph("ข้อกำหนดและการออกแบบ UI (แยกเป็นข้อ):")
+    items(UX)
     doc.add_heading("5.1 Wireframe", level=2)
     img("ui_wireframe.png", 6.5)
-    doc.add_heading("5.2 องค์ประกอบและพฤติกรรม", level=2)
+    doc.add_heading("5.2 องค์ประกอบ UI ทีละส่วน", level=2)
     table(["ส่วน", "Component", "หน้าที่ / พฤติกรรม"], [
         ("หัวเรื่อง", "gr.Markdown", "ชื่อระบบ + อธิบาย 2-stage + คลาส 8 ประเภท + ข้อความว่าเป็น prototype"),
         ("ภาพนำเข้า", "gr.Image (numpy)", "อัปโหลด/วาง/กล้อง; รองรับ grayscale/RGBA (แปลงเป็น BGR ภายใน)"),
@@ -256,27 +317,21 @@ def build_docx():
         ("ตรวจละเอียด", "gr.Checkbox", "เปิด test-time augmentation (ช้าลง ~2–3x)"),
         ("ปุ่มตรวจสอบ", "gr.Button (primary)", "เรียก analyze(image, conf, detailed); มี gr.Progress แสดงสถานะ"),
         ("ตัวอย่างภาพ", "gr.Examples", "รูปจาก test_images/ ให้กดลองได้ทันที"),
-        ("สรุปผล", "gr.Markdown (verdict)", "⚠️ พบตำหนิ N ชนิด / 🔴 ความเสี่ยงสูง / ✅ ไม่พบ + Stage1 % + จำนวนจุด + device"),
+        ("สรุปผล", "gr.Markdown (verdict)", "\"พบตำหนิ N ชนิด\" / \"ความเสี่ยงสูง: ...\" / \"ไม่พบตำหนิ\" + Stage1 % + จำนวนจุด + device"),
         ("ตารางตำหนิ", "gr.Dataframe", "บริเวณ | class | ชนิด(ไทย) | ความมั่นใจ | ความเสี่ยง — เรียงตามความเสี่ยง (สูง→ต่ำ) แล้วความมั่นใจ"),
         ("ภาพผลลัพธ์", "gr.Image", "ภาพต้นฉบับ + กรอบเขียว (region) + กรอบแดง (ตำหนิ) + ป้ายไทย"),
         ("ภาพ Stage 1", "gr.Image", "overlay สีเขียว = พื้นที่เหล็ก, กรอบส้ม = fallback ตรวจทั้งภาพ"),
     ], widths=[1.1, 1.5, 4.0])
-    doc.add_heading("5.3 หลักการออกแบบ (UX decisions)", level=2)
-    for line in [
-        "• โหลดโมเดลครั้งเดียวตอนเปิดแอป (ไม่หน่วงตอนกดปุ่มครั้งแรกแบบเงียบ ๆ)",
-        "• เน้น \"ความเสี่ยง\" ไม่ใช่แค่ชนิด — สรุปผลไฮไลต์ตำหนิเสี่ยงสูง (rust, crack) ก่อน",
-        "• แสดงภาพ Stage 1 ให้ผู้ใช้เห็นว่าระบบ \"มองเห็นเหล็กตรงไหน\" — ช่วยตีความผลและ debug",
-        "• ข้อความ/ป้ายทั้งหมดเป็นภาษาไทย (วาดผ่าน PIL + tahoma.ttf เพราะ cv2.putText ไม่รองรับไทย)",
-        "• ไม่มีขั้นตอนล็อกอิน/ตั้งค่าซับซ้อน — 1 ปุ่มเดียวได้ผล",
-    ]:
-        doc.add_paragraph(line)
 
     # ---- 6. Flowchart / Use Case ----
     h1("6. Flowchart / Use Case")
-    doc.add_heading("6.1 Use Case Diagram", level=2)
-    img("uml_1_usecase.png", 6.4)
+    doc.add_heading("6.1 Use Case — แยกเป็นข้อ", level=2)
+    items(UC)
+    img("uml_1_usecase.png", 6.4, "Use Case Diagram")
     doc.add_heading("6.2 Flowchart — การประมวลผล 1 ภาพ (process_image / analyze)", level=2)
-    img("uml_8_activity.png", 4.7)
+    doc.add_paragraph("ลำดับขั้น (แยกเป็นข้อ):")
+    items(FLOW)
+    img("uml_8_activity.png", 4.7, "Activity Diagram")
     doc.add_heading("6.3 Flowchart — การเตรียมข้อมูลและเทรน", level=2)
     img("d4_data_prep.png", 6.4)
     doc.add_heading("6.4 State — วงจรชีวิตของภาพระหว่างประมวลผล", level=2)
