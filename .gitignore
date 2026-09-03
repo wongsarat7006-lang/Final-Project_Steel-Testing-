@@ -13,6 +13,7 @@ crack_dataset/
 
 # Model weights และผลการเทรน
 runs/
+runs_*.log
 *.pt
 
 # ผลลัพธ์ที่ generate ได้เอง

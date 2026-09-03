@@ -38,11 +38,17 @@ mAP50 **0.853** / mAP50-95 **0.537** / R 0.809 (val 0.854 ≈ test → ไม่
 - `pipeline.py` ชี้ `train-gray-s` แล้ว, `results/stage2_*.json` × 3 + figures อัปเดตแล้ว
 - **หลักฐาน color shortcut:** train-balanced (เทรนสี) วัดบน test เทา → rust mAP 0.995 → **0.19 (R=0)**
 
-**ยังค้าง:** retrain yolo11n บน `merged_dataset_gray` เพื่อแยกผล "label+gray" ออกจาก "11n→11s"
+**✅ ablation model size — เสร็จแล้ว 2026-09-04**
+`train-gray-n` (yolo11n, resume จบที่ epoch 117, recipe/oversampling เดียวกับ train-gray-s):
+mAP50 **0.836** / mAP50-95 0.528 / R 0.785 บน `merged_dataset_gray` test
+→ เกน Tier 1+2 (train-balanced บน test เทา 0.544 → 0.836 = **+0.29**) มาจาก label สะอาด + grayscale
+  ส่วน yolo11n → yolo11s เพิ่มแค่ **+0.017 mAP50** — model size ไม่ใช่ปัจจัยหลัก
+- `results/stage2_train-gray-n.json`, `figures/per_class_map.png` (gray-n vs gray-s), README หัวข้อ "Ablation — model size"
 ```powershell
-python make_oversampled_list.py --dataset merged_dataset      # ถ้ายังไม่มี
+# ทำซ้ำได้ด้วย:
 python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml --name train-gray-n --epochs 120 --batch 8 --patience 40
 python evaluate.py --mode stage2 --weights runs/detect/train-gray-n/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-n.json
+python make_figures.py --runs train-clean train-balanced --evals "train-gray-n:results/stage2_train-gray-n.json" "train-gray-s:results/stage2_train-gray-s.json"
 ```
 
 <details><summary>วิธีทำเดิม (ทำไปแล้ว — เก็บไว้อ้างอิง)</summary>

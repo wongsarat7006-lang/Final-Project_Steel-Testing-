@@ -70,7 +70,8 @@ steel-defect-detection/
 │   ├── train/               เทรนครั้งแรก 6 คลาส (30 epochs)
 │   ├── train-2/             เทรน 8 คลาส บน dataset ที่ยังปนเปื้อน (50 epochs)
 │   ├── train-clean/         เทรน 8 คลาส dataset สะอาด, augmentation default (baseline)
-│   └── train-balanced/      เทรน 8 คลาส + oversampling + recipe texture  ← pipeline ใช้ best.pt ตัวนี้
+│   ├── train-balanced/      เทรน 8 คลาส + oversampling + recipe texture (yolo11n)
+│   └── train-gray-s/        yolo11s + label สะอาด + grayscale (Tier 1+2)  ← pipeline ใช้ best.pt ตัวนี้
 ├── figures/                 รูปประกอบรายงาน (generate ได้เอง)
 ├── test_images/             ภาพตัวอย่างเล่น ๆ สำหรับ demo pipeline
 └── pipeline_results/        ผลลัพธ์ (generate ได้เอง)
@@ -273,11 +274,13 @@ python app.py
 | train-2 (dataset ปนเปื้อน, test split เก่า) | 0.56 | – | – | – | – |
 | train-clean (dataset สะอาด, aug default) | 0.750 | 0.448 | 0.703 | 0.423 | 0.585 |
 | train-balanced (oversample + recipe texture) | 0.763 | 0.449 | 0.753 | 0.392 | 0.668 |
-| **train-gray-s** (Tier 1+2 — ดูหัวข้อถัดไป) | **0.853** | **0.537** | **0.809** | **0.870** | **0.860** |
+| train-gray-n (Tier 1+2, yolo11n — ablation) | 0.836 | 0.528 | 0.785 | 0.805 | 0.899 |
+| **train-gray-s** (Tier 1+2, yolo11s) | **0.853** | **0.537** | **0.809** | **0.870** | **0.860** |
 
-> ⚠️ **train-gray-s วัดคนละ protocol**: บน `merged_dataset_gray` test (ภาพ grayscale) และ label ของ
+> ⚠️ **2 แถวล่างวัดคนละ protocol**: บน `merged_dataset_gray` test (ภาพ grayscale) และ label ของ
 > crazing/rolled-in_scale ถูกรวมเป็น 1 กล่อง/ภาพ (`fix_labels.py`) — mAP ของ 2 คลาสนี้จึงวัด
-> "หา region ตำหนิ" ไม่ใช่ "ระบุแต่ละ patch" เทียบตัวเลขตรง ๆ กับ 2 แถวบนไม่ได้
+> "หา region ตำหนิ" ไม่ใช่ "ระบุแต่ละ patch" เทียบตัวเลขตรง ๆ กับ 3 แถวบนไม่ได้
+> (train-gray-n vs train-gray-s เทียบกันเองได้ — protocol เดียวกัน ดูหัวข้อ "Ablation — model size")
 
 ### Tier 1+2 — label สะอาด + grayscale + yolo11s (`runs/detect/train-gray-s`)
 
@@ -315,8 +318,24 @@ val mAP50 = 0.854 ≈ test 0.853 → ไม่ overfit
 `train-balanced` rust mAP50 **0.995 → 0.187 (recall → 0.00)** — โมเดลสีหา rust จากโทนสีเป็นหลัก
 พอเป็น grayscale แทบหาไม่เจอ → เป็นเหตุผลที่ต้องเทรนบน grayscale
 
-**ยังขาดสำหรับ ablation ที่แยกผลชัด:** retrain yolo11n บน `merged_dataset_gray` (label สะอาด + gray, ไม่เปลี่ยน model size)
-→ แยกผลของ "label+gray" ออกจาก "11n→11s". ตอนนี้ทั้ง 3 อย่างรวมอยู่ใน train-gray-s
+### Ablation — model size: `train-gray-n` (yolo11n) vs `train-gray-s` (yolo11s)
+
+เทรน yolo11n บน `merged_dataset_gray` ด้วย recipe/oversampling ชุดเดียวกับ train-gray-s
+(ต่างกันแค่ขนาดโมเดล) → แยกผลของ "label สะอาด + grayscale" ออกจาก "11n → 11s"
+วัดบน `merged_dataset_gray` test (protocol เดียวกับ train-gray-s):
+
+| Config | mAP50 | mAP50-95 | P | R |
+|---|---|---|---|---|
+| train-balanced (yolo11n, สี) วัดบน test เทา | 0.544 | 0.295 | 0.660 | 0.561 |
+| **train-gray-n** (yolo11n + label สะอาด + gray) | **0.836** | 0.528 | 0.850 | 0.785 |
+| **train-gray-s** (yolo11s + label สะอาด + gray) | **0.853** | 0.537 | 0.836 | 0.809 |
+
+รายคลาส mAP50 (`figures/per_class_map.png`) — train-gray-n / train-gray-s แทบทับกันทุกคลาส
+(gray-s นำ crazing/patches/pitted/scratches ~0.03–0.06, gray-n นำ rolled-in_scale/crack ~0.02–0.04)
+
+**อ่านผล:** เกน Tier 1+2 เกือบทั้งหมด (0.544 → 0.836, **+0.29 mAP50**) มาจาก **label สะอาด + grayscale**
+ส่วนการอัป yolo11n → yolo11s ได้เพิ่มแค่ **+0.017 mAP50** (recall +0.024) — model size ไม่ใช่ปัจจัยหลัก
+ในโดเมนนี้ ถ้าต้องการ throughput สูง yolo11n คุ้มกว่า (2.6M param / 6.4 GFLOPs เทียบ yolo11s ~9.4M / 21.5 — เบากว่า ~3× ที่ mAP ตกแค่ ~2 จุด)
 
 ### Per-class confidence threshold (`tune_thresholds.py` → `thresholds.json`)
 

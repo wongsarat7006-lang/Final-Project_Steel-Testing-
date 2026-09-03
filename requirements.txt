@@ -9,8 +9,13 @@ numpy>=1.26
 # Prototype UI (app.py)
 gradio>=4.44
 
-# เอกสารไดอาแกรม (make_diagrams_doc.py)
+# รูปประกอบรายงาน (make_figures.py)
+matplotlib>=3.8
+
+# เอกสารไดอาแกรม (make_diagrams_doc.py / make_uml_doc.py / make_design_doc.py)
 python-docx>=1.1
+# รวม docx เป็นไฟล์เดียว (make_combined_doc.py)
+docxcompose>=1.4
 
 # torch / torchvision — ติดตั้งตามคอมเมนต์ด้านบน (ไม่ pin ที่นี่เพราะขึ้นกับ CUDA ของเครื่อง)
 torch>=2.2

@@ -155,7 +155,7 @@ def build_ui():
     with gr.Blocks(title="Steel Defect Detection (2-stage)") as demo:
         gr.Markdown(
             "# ตรวจจับตำหนิพื้นผิวเหล็ก — Prototype\n"
-            "**Stage 1** DMS46 หาพื้นที่ที่เป็นเหล็ก → **Stage 2** YOLO11 (train-balanced) ตรวจชนิดตำหนิ 8 ประเภท "
+            "**Stage 1** DMS46 หาพื้นที่ที่เป็นเหล็ก → **Stage 2** YOLO11s (train-gray-s) ตรวจชนิดตำหนิ 8 ประเภท "
             "— crazing, inclusion, patches, pitted_surface, rolled-in_scale, scratches, rust, crack\n"
             "> prototype ผู้ช่วยคัดกรอง — ไม่ใช่ระบบตรวจสอบใช้งานจริง"
         )
