@@ -50,6 +50,7 @@ steel-defect-detection/
 ├── tune_thresholds.py       [accuracy] หา per-class confidence จาก val → thresholds.json
 ├── make_figures.py          สร้างรูปประกอบรายงานลง figures/
 ├── make_diagrams_doc.py     สร้าง docs/system_diagrams.docx (ไดอาแกรมสถาปัตยกรรม 5 รูป)
+├── make_uml_doc.py          สร้าง docs/uml_sa_diagrams.docx (UML/SA 10 รูป: use case, C4, ERD, sequence, ...)
 ├── test_smoke.py            smoke test — รัน pipeline 1 ภาพ + เช็คโครง output (กัน regression)
 ├── app.py                   Prototype UI (Gradio)
 ├── prepare_data.md          ขั้นตอนเตรียม dataset ตั้งแต่ต้น (reproducibility)
