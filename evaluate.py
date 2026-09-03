@@ -170,7 +170,7 @@ def main():
     parser.add_argument("--conf", type=float, default=0.4)
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     parser.add_argument("--weights", default=None,
-                        help="path ของ Stage 2 .pt (default: ตัวใน pipeline.py = train-clean/best.pt)")
+                        help="path ของ Stage 2 .pt (default: ตัวใน pipeline.py = train-gray-s/best.pt)")
     parser.add_argument("--out", default=str(BASE_DIR / "results" / "stage2_latest.json"))
     args = parser.parse_args()
 

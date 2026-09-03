@@ -26,8 +26,8 @@ BASE_DIR = Path(__file__).resolve().parent
 
 def main():
     ap = argparse.ArgumentParser(description="หา per-class confidence threshold จาก val")
-    ap.add_argument("--weights", default="runs/detect/train-balanced/weights/best.pt")
-    ap.add_argument("--data", default="merged_dataset/data.yaml")
+    ap.add_argument("--weights", default="runs/detect/train-gray-s/weights/best.pt")
+    ap.add_argument("--data", default="merged_dataset_gray/data.yaml")
     ap.add_argument("--split", default="val")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--floor", type=float, default=0.15, help="conf ต่ำสุดที่ยอมรับ")
