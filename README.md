@@ -49,6 +49,7 @@ steel-defect-detection/
 ├── make_oversampled_list.py class-balanced oversampling (มี --dataset) → <ds>/train_oversampled.txt
 ├── tune_thresholds.py       [accuracy] หา per-class confidence จาก val → thresholds.json
 ├── make_figures.py          สร้างรูปประกอบรายงานลง figures/
+├── make_diagrams_doc.py     สร้าง docs/system_diagrams.docx (ไดอาแกรมสถาปัตยกรรม 5 รูป)
 ├── test_smoke.py            smoke test — รัน pipeline 1 ภาพ + เช็คโครง output (กัน regression)
 ├── app.py                   Prototype UI (Gradio)
 ├── prepare_data.md          ขั้นตอนเตรียม dataset ตั้งแต่ต้น (reproducibility)
