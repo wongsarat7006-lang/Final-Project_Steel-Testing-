@@ -27,5 +27,8 @@ evaluation_results*.json
 __pycache__/
 *.pyc
 
+# MS Office lock files
+~$*
+
 # Environment variables
 .env
