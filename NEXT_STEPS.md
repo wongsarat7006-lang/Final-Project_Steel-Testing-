@@ -11,6 +11,42 @@ cd C:\Users\Lenovo\steel-defect-detection
 
 ---
 
+## 🔴 ขั้น 0.5 — แก้ DATA LEAKAGE (ทำ 2026-09-05, ต้อง retrain ต่อ)
+
+**พบ:** `check_leakage.py` — rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train
+(ชุด Roboflow "Danger-Rust" เป็นภาพถ่ายรัว → split เดิมสุ่มแยกเฟรมติดกันคนละ split)
+→ rust mAP 0.995 เดิม = เฟค, overall mAP50 0.853 สูงเกินจริง
+
+**แก้แล้ว:** `resplit_grouped.py` — group-aware stratified re-split (จับกลุ่มภาพ near-duplicate
+ไว้ split เดียวกัน) กับ `merged_dataset/` + `merged_dataset_gray/` พร้อมกัน
+- split ใหม่ 3338 / 422 / 425 (ครบ 8 คลาสทุก split), ratio 80/10/10 เท่าเดิม
+- `check_leakage.py` หลังแก้ = **0 คู่** ทั้งสอง dataset
+- backup split เดิม: `results/split_manifest_preleakagefix.json`
+- `train_oversampled.txt` regenerate แล้ว (4532 บรรทัด)
+
+**ยังต้องทำ (เรียงลำดับ):**
+```powershell
+# 1. retrain 2 โมเดลบน split สะอาด (ข้ามคืน)
+python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
+                --model yolo11s.pt --name train-gray-s2 --epochs 120 --batch 6 --patience 40
+python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
+                --model yolo11n.pt --name train-gray-n2 --epochs 120 --batch 8 --patience 40
+
+# 2. วัดผล + threshold ใหม่
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-s2/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-s.json
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-n2/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-n.json
+python tune_thresholds.py --weights runs/detect/train-gray-s2/weights/best.pt --data merged_dataset_gray/data.yaml
+python evaluate_stage1.py                       # Stage 1 เชิงตัวเลข (test set ใหม่)
+
+# 3. อัปเดต pipeline.py STAGE2_MODEL_PATH -> train-gray-s2, รูป, README, thesis_notes
+python make_figures.py --runs train-clean train-balanced --evals "train-gray-n:results/stage2_train-gray-n.json" "train-gray-s:results/stage2_train-gray-s.json"
+python test_smoke.py
+
+# 4. แทนภาพตัวอย่าง demo ที่ตอนนี้ตกไปอยู่ train ด้วยภาพจาก test split ใหม่
+```
+
+---
+
 ## ✅ ขั้น 0 — เสร็จแล้ว (ผมทำให้)
 
 - cross-region NMS ใน `pipeline.py` (+ flag `--nms-iou`)

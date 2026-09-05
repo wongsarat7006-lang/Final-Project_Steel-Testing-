@@ -89,10 +89,13 @@
 
 ---
 
-## สถานะปัจจุบัน (2026-09-03)
+## สถานะปัจจุบัน (2026-09-05)
 
 | งาน | สถานะ |
 |---|---|
+| **Data leakage audit** (`check_leakage.py`) | ✅ พบ rust valid 100% / test 98% รั่ว (Roboflow burst photos) |
+| **Group-aware re-split** (`resplit_grouped.py`) | ✅ split ใหม่ 3338/422/425, leakage = 0, backup `results/split_manifest_preleakagefix.json` |
+| **Retrain บน split สะอาด** | ⏳ ตัวเลข mAP ทั้งหมดในตารางล่างเป็นของ split เก่า (รั่ว) — ต้องเทรน+วัดใหม่ (ดู NEXT_STEPS ขั้น 0.5) |
 | Stage 2 train-balanced (yolo11n) | ✅ mAP50 0.763 / R 0.753 — baseline |
 | **Stage 2 train-gray-s (yolo11s + Tier 1+2)** | ✅ **mAP50 0.853 / mAP50-95 0.537 / R 0.809** — `runs/detect/train-gray-s` (pipeline ชี้ตัวนี้), val 0.854 ≈ test → ไม่ overfit |
 | Tier 1: `fix_labels.py` (merge crazing/rolled-in) + `make_grayscale_dataset.py` | ✅ |

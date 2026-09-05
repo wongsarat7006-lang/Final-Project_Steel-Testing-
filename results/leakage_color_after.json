@@ -1,0 +1,11 @@
+{
+  "data": "C:\\Users\\Lenovo\\steel-defect-detection\\merged_dataset",
+  "threshold": 24,
+  "split_sizes": {
+    "train": 3338,
+    "valid": 422,
+    "test": 425
+  },
+  "n_cross_split_pairs": 0,
+  "pairs": []
+}
