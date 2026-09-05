@@ -341,6 +341,7 @@ def build_docx():
     h1("ภาคผนวก — เอกสารประกอบ")
     doc.add_paragraph("• docs/system_diagrams.docx — ไดอาแกรมสถาปัตยกรรม 5 รูป (รายละเอียดภายในแต่ละ Stage + eval)")
     doc.add_paragraph("• docs/uml_sa_diagrams.docx — UML/SA 10 รูป (use case, context, C4 L1/L2, ERD, class, sequence, activity, state, deployment)")
+    doc.add_paragraph("• docs/database_design.docx — รายละเอียด Database Design เต็ม (ขยายจากหัวข้อ 4 ข้างบน): Data Dictionary ระดับฟิลด์, ตัวอย่างข้อมูลจริง, Relational Schema เทียบเท่าถ้าย้ายไป RDBMS")
     doc.add_paragraph("• README.md / prepare_data.md / NEXT_STEPS.md / thesis_notes.md — คู่มือและบันทึกการทดลอง")
     doc.add_paragraph("• figures/ — training_curves, per_class_map, class_distribution, confusion_compare")
 
