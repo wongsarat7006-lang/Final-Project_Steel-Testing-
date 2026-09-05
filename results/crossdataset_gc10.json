@@ -1,0 +1,63 @@
+{
+  "dir": "C:\\Users\\Lenovo\\steel-defect-detection\\external_test\\gc10",
+  "conf": 0.4,
+  "iou": 0.5,
+  "source_classes": [
+    "defect",
+    "10_yaozhed",
+    "1_chongkong",
+    "2_hanfeng",
+    "3_yueyawan",
+    "4_shuiban",
+    "5_youban",
+    "6_siban",
+    "7_yiwu",
+    "8_yahen",
+    "9_zhehen"
+  ],
+  "class_map": {
+    "7_yiwu": "inclusion"
+  },
+  "pipeline": {
+    "n_images": 224,
+    "sec_per_image": 0.184,
+    "presence_recall": 0.2366,
+    "loc_agnostic_recall": 0.0086,
+    "loc_agnostic_precision": 0.05,
+    "n_gt_boxes": 347,
+    "n_pred_boxes": 60,
+    "stage1_metal_found_rate": 0.4554,
+    "fallback_rate": 0.7768,
+    "mapped_per_class": {
+      "inclusion": {
+        "tp": 0,
+        "fp": 14,
+        "fn": 34,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    }
+  },
+  "baseline": {
+    "n_images": 224,
+    "sec_per_image": 0.038,
+    "presence_recall": 0.1384,
+    "loc_agnostic_recall": 0.0086,
+    "loc_agnostic_precision": 0.0938,
+    "n_gt_boxes": 347,
+    "n_pred_boxes": 32,
+    "stage1_metal_found_rate": 0.0,
+    "fallback_rate": 1.0,
+    "mapped_per_class": {
+      "inclusion": {
+        "tp": 0,
+        "fp": 10,
+        "fn": 34,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    }
+  }
+}

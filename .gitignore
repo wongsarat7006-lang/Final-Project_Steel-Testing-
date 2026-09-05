@@ -33,3 +33,6 @@ __pycache__/
 
 # Environment variables
 .env
+
+# Cross-dataset test images (โหลดใหม่ได้จาก HF — ดู cross_dataset_eval.md)
+external_test/*/images/
