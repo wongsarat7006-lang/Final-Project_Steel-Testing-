@@ -155,7 +155,7 @@ def build_ui():
     with gr.Blocks(title="Steel Defect Detection (2-stage)") as demo:
         gr.Markdown(
             "# ตรวจจับตำหนิพื้นผิวเหล็ก — Prototype\n"
-            "**Stage 1** DMS46 หาพื้นที่ที่เป็นเหล็ก → **Stage 2** YOLO11 (train-balanced) ตรวจชนิดตำหนิ 8 ประเภท "
+            "**Stage 1** DMS46 หาพื้นที่ที่เป็นเหล็ก → **Stage 2** YOLO11s (train-gray-s) ตรวจชนิดตำหนิ 8 ประเภท "
             "— crazing, inclusion, patches, pitted_surface, rolled-in_scale, scratches, rust, crack\n"
             "> prototype ผู้ช่วยคัดกรอง — ไม่ใช่ระบบตรวจสอบใช้งานจริง"
         )
@@ -186,8 +186,46 @@ def build_ui():
     return demo
 
 
+def _lan_ip():
+    """เดา IP วง LAN ของเครื่องนี้ (ไว้บอกคนอื่นในวง wifi/สาย เดียวกันให้เปิดตาม)"""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))  # ไม่ได้ส่งข้อมูลจริง แค่ให้ OS เลือก interface ที่ออกเน็ตได้
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
 if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--share", action="store_true",
+                     help="สร้างลิงก์สาธารณะ *.gradio.live ผ่านทันเนลของ Gradio "
+                          "(ไว้ให้คนไม่ได้อยู่วง wifi/LAN เดียวกันทดลองใช้ได้ — ลิงก์อยู่ได้ 72 ชม. "
+                          "ภาพที่อัปโหลดจะผ่านเซิร์ฟเวอร์ของ Gradio ด้วย)")
+    ap.add_argument("--port", type=int, default=7860)
+    ap.add_argument("--local-only", action="store_true",
+                     help="เปิดเฉพาะเครื่องนี้ (127.0.0.1) — ค่าเริ่มต้นคือเปิดทั้งวง LAN (0.0.0.0) "
+                          "ให้คนที่ต่อ wifi/สายเดียวกันเข้าได้ด้วย")
+    args = ap.parse_args()
+
     print("กำลังเตรียมโมเดล (โหลดครั้งเดียวตอนเริ่ม)...")
     _ensure_models()
-    print("พร้อมใช้งาน — เปิด http://127.0.0.1:7860\n")
-    build_ui().queue().launch()
+
+    host = "127.0.0.1" if args.local_only else "0.0.0.0"
+    print(f"พร้อมใช้งาน — เปิดเองที่ http://127.0.0.1:{args.port}")
+    if not args.local_only:
+        lan_ip = _lan_ip()
+        if lan_ip:
+            print(f"คนอื่นในวง wifi/LAN เดียวกัน เปิดที่ http://{lan_ip}:{args.port}")
+        print("  (ถ้าเข้าจากเครื่องอื่นไม่ได้ ให้เช็ค Windows Firewall — "
+              f"ต้องอนุญาต inbound พอร์ต {args.port} สำหรับเครือข่ายส่วนตัว/Private)")
+    if args.share:
+        print("กำลังสร้างลิงก์สาธารณะ *.gradio.live ... (รอสักครู่)")
+    print()
+
+    build_ui().queue().launch(server_name=host, server_port=args.port, share=args.share)

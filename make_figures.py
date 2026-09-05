@@ -9,7 +9,7 @@
 วิธีใช้:
     python make_figures.py
     python make_figures.py --runs train-clean train-balanced
-    python make_figures.py --evals train-clean:evaluation_results.json train-balanced:eval_balanced.json
+    python make_figures.py --evals train-clean:results/stage2_train-clean.json train-balanced:results/stage2_train-gray-s.json
 """
 import argparse
 import csv
@@ -176,8 +176,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", nargs="+", default=["train-clean", "train-balanced"])
     ap.add_argument("--evals", nargs="+",
-                    default=["train-clean:evaluation_results_clean.json",
-                             "train-balanced:evaluation_results_balanced.json"],
+                    default=["train-clean:results/stage2_train-clean.json",
+                             "train-balanced:results/stage2_train-balanced.json"],
                     help="รายการ name:path.json ของผล eval Stage 2")
     args = ap.parse_args()
 

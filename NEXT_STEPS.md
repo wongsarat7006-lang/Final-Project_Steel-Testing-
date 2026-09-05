@@ -11,10 +11,46 @@ cd C:\Users\Lenovo\steel-defect-detection
 
 ---
 
+## 🔴 ขั้น 0.5 — แก้ DATA LEAKAGE (ทำ 2026-09-05, ต้อง retrain ต่อ)
+
+**พบ:** `check_leakage.py` — rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train
+(ชุด Roboflow "Danger-Rust" เป็นภาพถ่ายรัว → split เดิมสุ่มแยกเฟรมติดกันคนละ split)
+→ rust mAP 0.995 เดิม = เฟค, overall mAP50 0.853 สูงเกินจริง
+
+**แก้แล้ว:** `resplit_grouped.py` — group-aware stratified re-split (จับกลุ่มภาพ near-duplicate
+ไว้ split เดียวกัน) กับ `merged_dataset/` + `merged_dataset_gray/` พร้อมกัน
+- split ใหม่ 3338 / 422 / 425 (ครบ 8 คลาสทุก split), ratio 80/10/10 เท่าเดิม
+- `check_leakage.py` หลังแก้ = **0 คู่** ทั้งสอง dataset
+- backup split เดิม: `results/split_manifest_preleakagefix.json`
+- `train_oversampled.txt` regenerate แล้ว (4532 บรรทัด)
+
+**ยังต้องทำ (เรียงลำดับ):**
+```powershell
+# 1. retrain 2 โมเดลบน split สะอาด (ข้ามคืน)
+python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
+                --model yolo11s.pt --name train-gray-s2 --epochs 120 --batch 6 --patience 40
+python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
+                --model yolo11n.pt --name train-gray-n2 --epochs 120 --batch 8 --patience 40
+
+# 2. วัดผล + threshold ใหม่
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-s2/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-s.json
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-n2/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-n.json
+python tune_thresholds.py --weights runs/detect/train-gray-s2/weights/best.pt --data merged_dataset_gray/data.yaml
+python evaluate_stage1.py                       # Stage 1 เชิงตัวเลข (test set ใหม่)
+
+# 3. อัปเดต pipeline.py STAGE2_MODEL_PATH -> train-gray-s2, รูป, README, thesis_notes
+python make_figures.py --runs train-clean train-balanced --evals "train-gray-n:results/stage2_train-gray-n.json" "train-gray-s:results/stage2_train-gray-s.json"
+python test_smoke.py
+
+# 4. แทนภาพตัวอย่าง demo ที่ตอนนี้ตกไปอยู่ train ด้วยภาพจาก test split ใหม่
+```
+
+---
+
 ## ✅ ขั้น 0 — เสร็จแล้ว (ผมทำให้)
 
 - cross-region NMS ใน `pipeline.py` (+ flag `--nms-iou`)
-- `evaluate_stage1.py` — รันเต็ม 416 ภาพแล้ว → `stage1_results.json`
+- `evaluate_stage1.py` — รันเต็ม 416 ภาพแล้ว → `results/stage1_dms46_test.json`
   (fallback 78%, gt_area_kept 16%, 208 ms/ภาพ GPU) → README หัวข้อ "Stage 1 metric เชิงตัวเลข"
 - **รวมตรรกะ fallback เป็นฟังก์ชันเดียว** `pipeline.build_regions()` — ใช้ร่วมกันโดย
   `pipeline.py` / `evaluate.py` / `evaluate_real.py` / `app.py` (เดิม copy กัน 4 ที่ + drift)
@@ -28,7 +64,30 @@ cd C:\Users\Lenovo\steel-defect-detection
 
 ---
 
-## ขั้น 1 — ปรับความแม่นยำ (Tier 1 + 2)
+## ✅ ขั้น 1 — ปรับความแม่นยำ (Tier 1 + 2) — เสร็จแล้ว 2026-09-03
+
+**ผล `train-gray-s`** (yolo11s, 120 ep, texture recipe, gray + label สะอาด):
+mAP50 **0.853** / mAP50-95 **0.537** / R 0.809 (val 0.854 ≈ test → ไม่ overfit)
+- crazing recall 0.42 → **0.80**, rolled-in_scale → 0.83
+- crack ยังอ่อนสุด (mAP50 0.669) — grayscale อาจลด contrast รอยแตก
+- `thresholds.json`: macro-F1 val 0.814 → **0.843**
+- `pipeline.py` ชี้ `train-gray-s` แล้ว, `results/stage2_*.json` × 3 + figures อัปเดตแล้ว
+- **หลักฐาน color shortcut:** train-balanced (เทรนสี) วัดบน test เทา → rust mAP 0.995 → **0.19 (R=0)**
+
+**✅ ablation model size — เสร็จแล้ว 2026-09-04**
+`train-gray-n` (yolo11n, resume จบที่ epoch 117, recipe/oversampling เดียวกับ train-gray-s):
+mAP50 **0.836** / mAP50-95 0.528 / R 0.785 บน `merged_dataset_gray` test
+→ เกน Tier 1+2 (train-balanced บน test เทา 0.544 → 0.836 = **+0.29**) มาจาก label สะอาด + grayscale
+  ส่วน yolo11n → yolo11s เพิ่มแค่ **+0.017 mAP50** — model size ไม่ใช่ปัจจัยหลัก
+- `results/stage2_train-gray-n.json`, `figures/per_class_map.png` (gray-n vs gray-s), README หัวข้อ "Ablation — model size"
+```powershell
+# ทำซ้ำได้ด้วย:
+python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml --name train-gray-n --epochs 120 --batch 8 --patience 40
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-n/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-n.json
+python make_figures.py --runs train-clean train-balanced --evals "train-gray-n:results/stage2_train-gray-n.json" "train-gray-s:results/stage2_train-gray-s.json"
+```
+
+<details><summary>วิธีทำเดิม (ทำไปแล้ว — เก็บไว้อ้างอิง)</summary>
 
 หลักฐาน (`train-balanced/results.csv` + label geometry):
 - val mAP50 พีค **epoch 62 (0.80)** แล้วไหลลง → เทรนนานขึ้น/imgsz สูงขึ้น **ไม่ช่วย**
@@ -63,17 +122,23 @@ python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yam
 ### 1.3 วัดผล + หา per-class threshold (~10 นาที)
 
 ```powershell
-# mAP50 / mAP50-95 ต่อคลาส บน test  -> evaluation_results.json
-python evaluate.py --mode stage2 --weights runs/detect/train-gray-s/weights/best.pt --data merged_dataset_gray/data.yaml --out evaluation_results_gray_s.json
+# mAP50 / mAP50-95 ต่อคลาส บน test  -> results/stage2_train-gray-s.json
+python evaluate.py --mode stage2 --weights runs/detect/train-gray-s/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-s.json
 
 # per-class confidence threshold จาก val  -> thresholds.json (pipeline/app จะใช้เอง)
 python tune_thresholds.py --weights runs/detect/train-gray-s/weights/best.pt --data merged_dataset_gray/data.yaml
 
-# อัปเดตให้ pipeline.py ใช้โมเดลใหม่: แก้ STAGE2_MODEL_PATH ใน pipeline.py -> train-gray-s/weights/best.pt
+# ใช้โมเดลใหม่กับ pipeline: python pipeline.py --weights runs/detect/train-gray-s/weights/best.pt ...
+#   หรือแก้ STAGE2_MODEL_PATH ใน pipeline.py ให้เป็น default
 ```
 
-**ส่งกลับมา:** `evaluation_results_gray_s.json` + `thresholds.json` + เลข mAP จาก console
-→ เติมตารางเทียบใน README + รัน `make_figures.py`
+> เทียบให้ยุติธรรม: วัด train-clean / train-balanced ใหม่บน **test label ชุดเดียวกัน** ด้วย
+> `python evaluate.py --mode stage2 --weights runs/detect/train-clean/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-clean.json` (และ train-balanced)
+> — ตัวเลขเดิมใน README วัดก่อน `fix_labels.py` เทียบตรงไม่ได้
+
+เช็ค regression: `python test_smoke.py`
+
+</details>
 
 ---
 
@@ -144,6 +209,6 @@ python evaluate_real.py            # ทำทั้ง pipeline + baseline แ�
 
 | จากขั้น | ไฟล์ | ผมจะทำต่อ |
 |---|---|---|
-| 1 | `evaluation_results_gray_s.json` + `thresholds.json` + เลข mAP | เติมตารางเทียบใน README (Tier 1/2), รัน make_figures |
+| 1 | `results/stage2_train-gray-s.json` + `thresholds.json` + เลข mAP | เติมตารางเทียบใน README (Tier 1/2), รัน make_figures |
 | 3 | `real_test_results.json` | เติมตาราง Pipeline vs Baseline, confusion เทียบ |
 | 4 | คำตอบ 3 ข้อ | เขียนบทสรุป + ปรับ Limitations / ablation section |

@@ -13,16 +13,26 @@ crack_dataset/
 
 # Model weights และผลการเทรน
 runs/
+runs_*.log
 *.pt
 
 # ผลลัพธ์ที่ generate ได้เอง
 pipeline_results/
-evaluation_results.json
 real_test_results.json
+# scratch output ของ evaluate.py / evaluate_stage1.py (ไฟล์ที่เก็บถาวรตั้งชื่ออื่น)
+results/*_latest.json
+# ไฟล์เก่า — ย้ายไป results/ แล้ว
+evaluation_results*.json
 
 # Python cache
 __pycache__/
 *.pyc
 
+# MS Office lock files
+~$*
+
 # Environment variables
 .env
+
+# Cross-dataset test images (โหลดใหม่ได้จาก HF — ดู cross_dataset_eval.md)
+external_test/*/images/
