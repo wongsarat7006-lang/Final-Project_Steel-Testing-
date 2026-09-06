@@ -24,25 +24,23 @@ cd C:\Users\Lenovo\steel-defect-detection
 - backup split เดิม: `results/split_manifest_preleakagefix.json`
 - `train_oversampled.txt` regenerate แล้ว (4532 บรรทัด)
 
-**ยังต้องทำ (เรียงลำดับ):**
+**✅ เสร็จแล้ว 2026-09-06:**
+- retrain `train-gray-s2` (yolo11s) + `train-gray-n2` (yolo11n) บน split สะอาด
+- re-eval: `results/stage2_train-gray-{s,n}.json`, `thresholds.json`, `results/stage1_dms46_test.json`,
+  `results/crossdataset_gc10.json` — อัปเดตหมด
+- `pipeline.py` STAGE2_MODEL_PATH → `train-gray-s2` ; `make_figures.py` regenerate ; `test_smoke.py` ผ่าน
+- ภาพตัวอย่าง demo 8 ไฟล์ใน `test_images/` แทนด้วยภาพจาก test split ใหม่
+- README กล่อง ⚠️ + thesis_notes / cross_dataset_eval / literature_comparison / error_analysis อัปเดตแล้ว
+
+**ผลลัพธ์:** overall test mAP50 0.853 → **0.840** (s2) — ตกเล็กน้อย ตัวเลขเดิมเชื่อได้หลังแก้ ;
+`train-gray-n2` 0.867 ≥ s2 → model size ไม่ใช่ปัจจัยหลัก (ยืนยันชัดขึ้น)
+
+**ยังเหลือ:**
 ```powershell
-# 1. retrain 2 โมเดลบน split สะอาด (ข้ามคืน)
+# multi-seed 3 รอบ -> confidence interval (ขั้น 6)
 python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
-                --model yolo11s.pt --name train-gray-s2 --epochs 120 --batch 6 --patience 40
-python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
-                --model yolo11n.pt --name train-gray-n2 --epochs 120 --batch 8 --patience 40
-
-# 2. วัดผล + threshold ใหม่
-python evaluate.py --mode stage2 --weights runs/detect/train-gray-s2/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-s.json
-python evaluate.py --mode stage2 --weights runs/detect/train-gray-n2/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-n.json
-python tune_thresholds.py --weights runs/detect/train-gray-s2/weights/best.pt --data merged_dataset_gray/data.yaml
-python evaluate_stage1.py                       # Stage 1 เชิงตัวเลข (test set ใหม่)
-
-# 3. อัปเดต pipeline.py STAGE2_MODEL_PATH -> train-gray-s2, รูป, README, thesis_notes
-python make_figures.py --runs train-clean train-balanced --evals "train-gray-n:results/stage2_train-gray-n.json" "train-gray-s:results/stage2_train-gray-s.json"
-python test_smoke.py
-
-# 4. แทนภาพตัวอย่าง demo ที่ตอนนี้ตกไปอยู่ train ด้วยภาพจาก test split ใหม่
+                --model yolo11s.pt --name train-gray-s2-seed1 --epochs 120 --batch 6 --seed 1
+#   (ทำซ้ำ seed 2, 3 แล้วรวมเป็น mean ± std ต่อคลาส)
 ```
 
 ---

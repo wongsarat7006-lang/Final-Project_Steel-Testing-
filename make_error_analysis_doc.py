@@ -31,11 +31,11 @@ plt.rcParams["axes.unicode_minus"] = False
 
 # ---- ตัวเลขหลักฐาน (วัดได้จริงในเซสชันทดสอบ 2026-09-05) ----
 RUST_CONF = [
-    ("NEU/Roboflow crop\n(สไตล์ชุดเทรน)", 0.92, "#2e7d32"),
-    ("ภาพโซ่สนิม\nเต็มเฟรม", 0.21, "#e65100"),
+    ("NEU/Roboflow crop\n(สไตล์ชุดเทรน)", 0.95, "#2e7d32"),
+    ("ภาพโซ่สนิม\nเต็มเฟรม", 0.58, "#e65100"),
     ("ภาพ texture สนิม\n(stock photo)", 0.02, "#b71c1c"),
 ]
-RUST_THR = 0.90
+RUST_THR = 0.92
 
 STAGE1_RATIO = [
     ("NEU crop\ntest (n=416)", 0.05),
@@ -106,11 +106,11 @@ MODES = [
     ("EA-1", "Domain gap ของ Stage 2 (สไตล์ภาพนอกการกระจายของชุดเทรน)",
      "Stage 2 เทรนบน NEU-DET (crop texture เกรย์สเกลระยะใกล้) + Roboflow rust/crack "
      "(ภาพสไตล์เฉพาะ) พอเจอภาพสนิมสไตล์อื่น—เช่น texture stock photo หรือโซ่สนิมเต็มเฟรม—"
-     "ความมั่นใจตกจาก ~0.92 (สไตล์ชุดเทรน) เหลือ 0.02–0.21 หลุดใต้ threshold ทุกกรณี "
-     "จึงรายงานว่า \"ไม่พบตำหนิ\" ทั้งที่ภาพเป็นสนิมชัดเจน",
+     "ความมั่นใจตกจาก ~0.95 (สไตล์ชุดเทรน) เหลือ 0.02–0.58 หลุดใต้ per-class threshold "
+     "ของ rust (0.92) ทุกกรณี จึงรายงานว่า \"ไม่พบตำหนิ\" ทั้งที่ภาพเป็นสนิมชัดเจน",
      "ea_2_rust_conf.png",
-     "หลักฐาน: ทดสอบ 3 ภาพ (สนิม.jpg raw conf ≈ 0.02 ; images(2).jpg โซ่สนิม 0.21 ; "
-     "Danger-Rust crop 0.92) — โมเดลตัวเดียวกัน ต่างกันแค่สไตล์ภาพ"),
+     "หลักฐาน: ทดสอบ 3 ภาพ (สนิม.jpg raw conf ≈ 0 ; images(2).jpg โซ่สนิม 0.58 ; "
+     "Danger-Rust crop 0.95) — โมเดล train-gray-s2 ตัวเดียวกัน ต่างกันแค่สไตล์ภาพ"),
     ("EA-2", "Stage 1 (DMS46) หาโลหะไม่เจอบนเหล็กทาสี / สนิมหนัก / ฉากรก",
      "DMS46 เป็น material segmentation ระดับฉากทั่วไป ไม่ได้ fine-tune กับเหล็กอุตสาหกรรม "
      "บน test set (crop NEU 416 ภาพ) fallback_rate 78%, gt_area_kept 16%; บนภาพฉากจริง "
@@ -121,24 +121,25 @@ MODES = [
     ("EA-3", "False positive จากกราฟิก/โลโก้/ลายน้ำในภาพจริง",
      "ภาพจากผู้ขายเหล็ก (โฆษณา) มักมีโลโก้บริษัท ตัวหนังสือ กรอบสี ทับบนภาพ "
      "Stage 1 หาโลหะไม่เจอ (metal_ratio 0%) → fallback ทั้งภาพ → Stage 2 ไปตีกรอบ "
-     "\"โลโก้วงกลม\" แล้วจำแนกเป็น crack 37.7% (ผ่าน threshold ของ crack ที่ 0.36) "
-     "ขณะที่รอยขีดข่วนจริงกลางภาพได้แค่ 0.17 (ไม่ผ่าน) → ระบบตอบผิดทั้งชนิดและตำแหน่ง",
+     "\"โลโก้วงกลม\" แล้วจำแนกเป็น crack ~47% (ผ่าน threshold ของ crack ที่ 0.38) "
+     "ขณะที่รอยขีดข่วนจริงกลางภาพได้แค่ ~0.20 (ไม่ผ่าน) → ระบบตอบผิดทั้งชนิดและตำแหน่ง",
      "ea_1_logo_fp.png",
      "หลักฐาน: real_test/images/real_002_stainless_scratch.webp — กรอบแดงอยู่ที่โลโก้ S.T.K. METAL"),
     ("EA-4", "Train/test leakage ในคลาส rust (แก้แล้ว — ดู check_leakage.py)",
      "ชุด Roboflow \"Danger-Rust\" เป็นภาพถ่ายรัว/เฟรมติดกัน การ split แบบสุ่มเดิมทำให้ "
-     "rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train → rust mAP 0.995 และ "
-     "overall mAP50 0.853 สูงเกินจริง แก้ด้วย group-aware re-split (resplit_grouped.py) "
-     "→ leakage = 0 แล้ว retrain/วัดผลใหม่",
+     "rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train (932 คู่). แก้ด้วย "
+     "group-aware re-split (resplit_grouped.py) → leakage = 0 แล้ว retrain (train-gray-s2/n2). "
+     "ผลหลังแก้: overall mAP50 0.853→0.840 (s2), rust ยังได้ 0.995 — แต่เป็นเพราะ subset "
+     "rust เป็นกลุ่มภาพ homogeneous แยกจาก NEU ง่าย ไม่ใช่ leakage แล้ว (ดู EA-1 + cross-dataset)",
      None,
      "หลักฐาน: results/leakage_gray.json (932 คู่ก่อนแก้) / leakage_gray_after.json (0)"),
     ("EA-5", "คลาสที่อ่อนแม้บน benchmark: crack และ inclusion",
-     "แม้บนชุดทดสอบสะอาด crack ได้ mAP50 ~0.67 / recall ~0.66 และ inclusion recall ~0.66 "
-     "— crack: grayscale ลด contrast ของรอยแยก + geometry เส้นบางทำ IoU ต่ำ; "
-     "inclusion: จุดเล็กกระจาย annotate ยาก เป็นข้อจำกัดที่พบใน literature ของ NEU-DET เช่นกัน "
-     "(ตัวเลขรายคลาสสุดท้ายให้ยึดผลหลัง retrain บน split ใหม่)",
+     "บนชุดทดสอบสะอาด (train-gray-s2) crack ได้ mAP50 0.667 / recall 0.635 และ "
+     "inclusion mAP50 0.793 / recall 0.741 — ต่ำกว่าคลาสอื่นชัด "
+     "crack: grayscale ลด contrast ของรอยแยก + geometry เส้นบางทำ IoU ต่ำ; "
+     "inclusion: จุดเล็กกระจาย annotate ยาก เป็นข้อจำกัดที่พบใน literature ของ NEU-DET เช่นกัน",
      None,
-     "หลักฐาน: results/stage2_train-gray-s.json (per_class) — จะอัปเดตหลัง retrain"),
+     "หลักฐาน: results/stage2_train-gray-s.json (per_class), split สะอาด 425 ภาพ"),
 ]
 
 MITIGATION = [

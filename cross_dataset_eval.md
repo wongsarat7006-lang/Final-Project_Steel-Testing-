@@ -29,18 +29,21 @@ python evaluate_cross_dataset.py --dir external_test/gc10 --map external_test/gc
 2. **loc-agnostic** recall/precision — จับคู่กล่องที่ IoU ≥ 0.5 ไม่สนคลาส
 3. **mapped** — inclusion: P/R/F1 ระดับกล่อง (IoU ≥ 0.5 + คลาสตรง)
 
-## ผล (โมเดล `train-gray-s` split เก่า — ต้องรันซ้ำหลัง retrain)
+## ผล (โมเดล `train-gray-s2` — retrain บน split สะอาดแล้ว)
 
-`results/crossdataset_gc10.json` · 224 ภาพ · 347 GT boxes
+`results/crossdataset_gc10.json` · 224 ภาพ · 347 GT boxes · conf 0.4 · IoU 0.5
 
 | metric | pipeline (S1+S2) | baseline (S2 ภาพเต็ม) |
 |---|---|---|
-| presence recall | 0.237 | 0.138 |
-| loc-agnostic recall | **0.009** | **0.009** |
-| loc-agnostic precision | 0.050 | 0.094 |
-| inclusion (mapped) TP/FP/FN | 0 / 14 / 34 | 0 / 10 / 34 |
+| presence recall | 0.335 | 0.259 |
+| loc-agnostic recall | **0.014** | **0.014** |
+| loc-agnostic precision | 0.052 | 0.069 |
+| inclusion (mapped) TP/FP/FN | 0 / 40 / 34 | 0 / 35 / 34 |
 | Stage 1 metal-found rate | 0.46 | — |
 | Stage 1 fallback rate | 0.78 | — |
+
+> เทียบกับโมเดล split เก่า (leaky): loc-agnostic recall 0.009 → 0.014, inclusion TP ยังคง 0
+> — ข้อสรุปเชิงคุณภาพไม่เปลี่ยน: **transfer แทบเป็นศูนย์**
 
 ### สรุป
 - **โมเดลแทบไม่ transfer ไป GC10-DET** — loc-agnostic recall ~1% (จับคู่ได้ 3/347 กล่อง),
@@ -51,6 +54,6 @@ python evaluate_cross_dataset.py --dir external_test/gc10 --map external_test/gc
   → เป็นข้อจำกัดหลักของระบบที่ต้องระบุในบทสรุป
 
 ### ทำต่อ
-- [ ] รันซ้ำด้วยโมเดลที่ retrain บน split สะอาด (คาดว่าผลเชิงคุณภาพไม่เปลี่ยน)
+- [x] รันซ้ำด้วยโมเดล retrain บน split สะอาด (`train-gray-s2`) — 2026-09-06, ผลไม่เปลี่ยน
 - [ ] (ถ้ามีเวลา) เพิ่ม Severstal steel defect (`Voxel51/severstal_steel_defects` บน HF) เป็น probe ที่ 2
       — เป็น segmentation mask 4 คลาสไม่มีชื่อ ต้องแปลงเป็น bbox ก่อน
