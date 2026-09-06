@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--patience", type=int, default=20, help="early stopping")
     parser.add_argument("--resume", action="store_true", help="เทรนต่อจาก checkpoint ล่าสุด")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--seed", type=int, default=0, help="random seed (multi-seed runs)")
     parser.add_argument("--recipe", default="default", choices=["default", "texture"],
                         help="default = augmentation เดิม | "
                              "texture = ลด mosaic/scale เพื่อรักษา texture เต็มภาพ "
@@ -98,7 +99,7 @@ def main():
             name=args.name,
             patience=args.patience,
             workers=args.workers,
-            seed=0,
+            seed=args.seed,
             deterministic=True,
             **aug,
         )
