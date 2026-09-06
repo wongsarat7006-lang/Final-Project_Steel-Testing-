@@ -1,0 +1,201 @@
+{
+  "n_seeds": 4,
+  "sources": [
+    "results\\stage2_grayn2_seed0.json",
+    "results\\stage2_grayn2_seed1.json",
+    "results\\stage2_grayn2_seed2.json",
+    "results\\stage2_grayn2_seed3.json"
+  ],
+  "overall": {
+    "mAP50": {
+      "mean": 0.8669,
+      "std": 0.0097,
+      "n": 4,
+      "values": [
+        0.8667,
+        0.8535,
+        0.8712,
+        0.8761
+      ]
+    },
+    "mAP50-95": {
+      "mean": 0.5361,
+      "std": 0.0088,
+      "n": 4,
+      "values": [
+        0.5268,
+        0.5407,
+        0.5461,
+        0.5309
+      ]
+    },
+    "precision": {
+      "mean": 0.8528,
+      "std": 0.0075,
+      "n": 4,
+      "values": [
+        0.8616,
+        0.8518,
+        0.8435,
+        0.8543
+      ]
+    },
+    "recall": {
+      "mean": 0.8092,
+      "std": 0.0073,
+      "n": 4,
+      "values": [
+        0.8089,
+        0.8007,
+        0.8088,
+        0.8185
+      ]
+    }
+  },
+  "per_class": {
+    "crazing": {
+      "mAP50": {
+        "mean": 0.8673,
+        "std": 0.0542
+      },
+      "mAP50-95": {
+        "mean": 0.4508,
+        "std": 0.0588
+      },
+      "precision": {
+        "mean": 0.8438,
+        "std": 0.0633
+      },
+      "recall": {
+        "mean": 0.8055,
+        "std": 0.0824
+      }
+    },
+    "inclusion": {
+      "mAP50": {
+        "mean": 0.8557,
+        "std": 0.016
+      },
+      "mAP50-95": {
+        "mean": 0.4452,
+        "std": 0.0109
+      },
+      "precision": {
+        "mean": 0.8145,
+        "std": 0.0336
+      },
+      "recall": {
+        "mean": 0.7885,
+        "std": 0.0181
+      }
+    },
+    "patches": {
+      "mAP50": {
+        "mean": 0.9611,
+        "std": 0.0113
+      },
+      "mAP50-95": {
+        "mean": 0.5605,
+        "std": 0.0137
+      },
+      "precision": {
+        "mean": 0.895,
+        "std": 0.0225
+      },
+      "recall": {
+        "mean": 0.8952,
+        "std": 0.0283
+      }
+    },
+    "pitted_surface": {
+      "mAP50": {
+        "mean": 0.8033,
+        "std": 0.0252
+      },
+      "mAP50-95": {
+        "mean": 0.4469,
+        "std": 0.0292
+      },
+      "precision": {
+        "mean": 0.7904,
+        "std": 0.043
+      },
+      "recall": {
+        "mean": 0.7561,
+        "std": 0.0259
+      }
+    },
+    "rolled-in_scale": {
+      "mAP50": {
+        "mean": 0.8187,
+        "std": 0.0482
+      },
+      "mAP50-95": {
+        "mean": 0.4724,
+        "std": 0.0428
+      },
+      "precision": {
+        "mean": 0.7662,
+        "std": 0.0461
+      },
+      "recall": {
+        "mean": 0.725,
+        "std": 0.05
+      }
+    },
+    "scratches": {
+      "mAP50": {
+        "mean": 0.9473,
+        "std": 0.0162
+      },
+      "mAP50-95": {
+        "mean": 0.5103,
+        "std": 0.0164
+      },
+      "precision": {
+        "mean": 0.8799,
+        "std": 0.022
+      },
+      "recall": {
+        "mean": 0.8971,
+        "std": 0.038
+      }
+    },
+    "rust": {
+      "mAP50": {
+        "mean": 0.995,
+        "std": 0.0
+      },
+      "mAP50-95": {
+        "mean": 0.966,
+        "std": 0.0154
+      },
+      "precision": {
+        "mean": 0.9938,
+        "std": 0.0002
+      },
+      "recall": {
+        "mean": 1.0,
+        "std": 0.0
+      }
+    },
+    "crack": {
+      "mAP50": {
+        "mean": 0.6865,
+        "std": 0.0111
+      },
+      "mAP50-95": {
+        "mean": 0.4367,
+        "std": 0.0116
+      },
+      "precision": {
+        "mean": 0.8388,
+        "std": 0.03
+      },
+      "recall": {
+        "mean": 0.6063,
+        "std": 0.0274
+      }
+    }
+  }
+}

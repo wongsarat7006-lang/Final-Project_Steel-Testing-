@@ -1,66 +1,66 @@
 {
-  "weights": "runs\\detect\\train-gray-s2\\weights\\best.pt",
+  "weights": "runs\\detect\\train-gray-n2\\weights\\best.pt",
   "data": "C:\\Users\\Lenovo\\steel-defect-detection\\merged_dataset_gray\\data.yaml",
   "split": "val",
   "compare_conf": 0.4,
-  "macro_f1_opt": 0.8547,
-  "macro_f1_at_compare": 0.8387,
+  "macro_f1_opt": 0.8436,
+  "macro_f1_at_compare": 0.8243,
   "per_class": {
     "crazing": {
-      "conf": 0.502,
-      "f1_opt": 0.8962,
-      "f1_at_compare": 0.8686,
-      "precision_opt": 0.9285,
-      "recall_opt": 0.866
+      "conf": 0.483,
+      "f1_opt": 0.8274,
+      "f1_at_compare": 0.7949,
+      "precision_opt": 0.8571,
+      "recall_opt": 0.7997
     },
     "inclusion": {
-      "conf": 0.434,
-      "f1_opt": 0.7886,
-      "f1_at_compare": 0.7702,
-      "precision_opt": 0.8282,
-      "recall_opt": 0.7526
+      "conf": 0.377,
+      "f1_opt": 0.7895,
+      "f1_at_compare": 0.7741,
+      "precision_opt": 0.7851,
+      "recall_opt": 0.7938
     },
     "patches": {
-      "conf": 0.413,
-      "f1_opt": 0.8842,
-      "f1_at_compare": 0.8792,
-      "precision_opt": 0.8659,
-      "recall_opt": 0.9032
+      "conf": 0.453,
+      "f1_opt": 0.8938,
+      "f1_at_compare": 0.877,
+      "precision_opt": 0.9301,
+      "recall_opt": 0.8602
     },
     "pitted_surface": {
-      "conf": 0.377,
-      "f1_opt": 0.8614,
-      "f1_at_compare": 0.8533,
-      "precision_opt": 0.8746,
-      "recall_opt": 0.8485
+      "conf": 0.266,
+      "f1_opt": 0.8693,
+      "f1_at_compare": 0.8592,
+      "precision_opt": 0.8328,
+      "recall_opt": 0.9091
     },
     "rolled-in_scale": {
-      "conf": 0.34,
-      "f1_opt": 0.7572,
-      "f1_at_compare": 0.7238,
-      "precision_opt": 0.6943,
-      "recall_opt": 0.8326
+      "conf": 0.558,
+      "f1_opt": 0.7402,
+      "f1_at_compare": 0.7032,
+      "precision_opt": 0.832,
+      "recall_opt": 0.6667
     },
     "scratches": {
-      "conf": 0.506,
-      "f1_opt": 0.913,
-      "f1_at_compare": 0.8978,
-      "precision_opt": 0.9692,
-      "recall_opt": 0.863
+      "conf": 0.433,
+      "f1_opt": 0.9013,
+      "f1_at_compare": 0.892,
+      "precision_opt": 0.9275,
+      "recall_opt": 0.8765
     },
     "rust": {
       "conf": 0.92,
-      "f1_opt": 0.9999,
-      "f1_at_compare": 0.9967,
-      "precision_opt": 0.9999,
+      "f1_opt": 1.0,
+      "f1_at_compare": 0.9968,
+      "precision_opt": 1.0,
       "recall_opt": 1.0
     },
     "crack": {
-      "conf": 0.38,
-      "f1_opt": 0.7367,
-      "f1_at_compare": 0.7201,
-      "precision_opt": 0.8029,
-      "recall_opt": 0.6806
+      "conf": 0.32,
+      "f1_opt": 0.7272,
+      "f1_at_compare": 0.6973,
+      "precision_opt": 0.7999,
+      "recall_opt": 0.6667
     }
   }
 }

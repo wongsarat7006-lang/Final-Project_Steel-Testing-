@@ -95,18 +95,20 @@
 |---|---|
 | **Data leakage audit** (`check_leakage.py`) | ✅ พบ rust valid 100% / test 98% รั่ว (Roboflow burst photos) 932 คู่ |
 | **Group-aware re-split** (`resplit_grouped.py`) | ✅ split ใหม่ 3338/422/425, leakage = 0, backup `results/split_manifest_preleakagefix.json` |
-| **Retrain + re-eval บน split สะอาด** | ✅ 2026-09-06 — `train-gray-s2` test mAP50 0.840 (จาก 0.853), `train-gray-n2` 0.867; ตัวเลขในตารางล่างอัปเดตแล้ว |
+| **Retrain + re-eval + multi-seed บน split สะอาด** | ✅ 2026-09-06 — **โมเดลหลัก = `train-gray-n2` (yolo11n)** test mAP50 **0.867 ± 0.010** (n=4); yolo11s 0.840 (ต่ำกว่า); ตัวเลขในตารางล่างอัปเดตแล้ว |
 | Stage 2 train-balanced (yolo11n) | ✅ mAP50 0.763 / R 0.753 — baseline |
-| **Stage 2 train-gray-s2 (yolo11s + Tier 1+2, split สะอาด)** | ✅ **test mAP50 0.840 / mAP50-95 0.525 / R 0.808** — `runs/detect/train-gray-s2` (pipeline ชี้ตัวนี้), val 0.874 ≈ test → ไม่ overfit |
-| Stage 2 train-gray-n2 (yolo11n, split สะอาด) | ✅ test mAP50 **0.867** / mAP50-95 0.527 / R 0.809 — `runs/detect/train-gray-n2` |
+| **Stage 2 train-gray-n2 (yolo11n, split สะอาด) — โมเดลหลัก** | ✅ **test mAP50 0.867 ± 0.010 / mAP50-95 0.536 ± 0.009 / R 0.809** (multi-seed n=4) — `runs/detect/train-gray-n2` (pipeline ชี้ตัวนี้) |
+| Stage 2 train-gray-s2 (yolo11s, split สะอาด) | ✅ test mAP50 0.840 — เล็กกว่า n2 ~2.7σ; ใหญ่กว่า 4x, ช้ากว่า 2x → ไม่ใช้ |
+| multi-seed (`aggregate_seeds.py`, n=4) | ✅ `results/stage2_multiseed.json` — crack อ่อนสุด 0.687 ± 0.011; crazing/rolled-in_scale std สูง (~0.05) |
 | Tier 1: `fix_labels.py` (merge crazing/rolled-in) + `make_grayscale_dataset.py` | ✅ |
-| Tier 2: `tune_thresholds.py` → macro-F1 val 0.839 → 0.855 (split สะอาด) | ✅ `thresholds.json` |
+| Tier 2: `tune_thresholds.py` (n2) → macro-F1 val 0.824 → 0.844 | ✅ `thresholds.json` |
 | Ablation B (aug/oversampling) | ✅ README + `figures/confusion_compare.png` |
 | `evaluate_stage1.py` | ✅ รันเต็ม 416 ภาพ → `results/stage1_dms46_test.json` |
 | cross-region NMS ใน `pipeline.py` | ✅ |
-| Ablation แยกผล label+gray vs 11n→11s | ✅ split สะอาด: `train-gray-n2` 0.867 ≈ `train-gray-s2` 0.840 → model size ไม่สำคัญ; เกนหลักมาจาก label+gray (`results/stage2_train-gray-*.json`) |
-| **Data leakage audit + group-aware re-split + retrain** | ✅ 2026-09-06 — `check_leakage.py` / `resplit_grouped.py` / `train-gray-s2,n2`; overall mAP แทบไม่ตก (0.853→0.840) → ตัวเลขเดิมเชื่อถือได้หลังแก้ |
+| Ablation แยกผล label+gray vs 11n vs 11s | ✅ split สะอาด: `train-gray-n2` **0.867 ± 0.010** > `train-gray-s2` 0.840 → **yolo11n ดีกว่า** yolo11s; เกนหลักมาจาก label+gray |
 | `real_test/` | ⏳ ต้องเก็บภาพเอง (ดู `NEXT_STEPS.md` ข้อ 3) |
 | Ablation Stage 1 (`evaluate_real.py`) | ⏳ รอ `real_test/` |
-| multi-seed / CI, leakage check, เทียบเปเปอร์ NEU-DET | ⏳ |
+| multi-seed (n=4), leakage check, เทียบเปเปอร์ NEU-DET | ✅ `results/stage2_multiseed.json`, `check_leakage.py`, `literature_comparison.md` |
+| cross-dataset test (GC10-DET แทน real_test) | ✅ `evaluate_cross_dataset.py`, `cross_dataset_eval.md` — transfer ~0 |
+| Error Analysis | ✅ `docs/error_analysis.docx` (EA-1..5) |
 | เคลียร์ baseline กับอาจารย์ | ⏳ |

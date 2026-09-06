@@ -5,7 +5,7 @@
 | Stage | หน้าที่ | โมเดล |
 |-------|---------|-------|
 | **1. Metal Localization** | หา region ในภาพที่เป็นวัสดุ "เหล็ก/โลหะ" แล้ว crop ออกมา | [DMS46](https://github.com/apple/ml-dms-dataset) (Apple Dense Material Segmentation, pre-trained, TorchScript) |
-| **2. Defect Detection** | ตรวจชนิดตำหนิบนภาพที่ crop มา 8 ประเภท | YOLO11s (เทรนเองบน dataset รวม, grayscale — `train-gray-s2`) |
+| **2. Defect Detection** | ตรวจชนิดตำหนิบนภาพที่ crop มา 8 ประเภท | YOLO11n (เทรนเองบน dataset รวม, grayscale — `train-gray-n2`) |
 
 ```
 ภาพถ่าย ──▶ [Stage 1: DMS46] ──▶ mask พื้นที่เหล็ก ──▶ crop
@@ -72,8 +72,8 @@ steel-defect-detection/
 │   ├── train-clean/         เทรน 8 คลาส dataset สะอาด, augmentation default (baseline)
 │   ├── train-balanced/      เทรน 8 คลาส + oversampling + recipe texture (yolo11n)
 │   ├── train-gray-s/        yolo11s (ก่อนแก้ leakage — เก็บไว้เทียบ)
-│   ├── train-gray-s2/       yolo11s + split สะอาด (Tier 1+2)  ← pipeline ใช้ best.pt ตัวนี้
-│   └── train-gray-n2/       yolo11n + split สะอาด (ablation model size)
+│   ├── train-gray-s2/       yolo11s + split สะอาด (เทียบ — model size ablation)
+│   └── train-gray-n2/       yolo11n + split สะอาด  ← pipeline ใช้ best.pt ตัวนี้ (multi-seed n=4)
 ├── figures/                 รูปประกอบรายงาน (generate ได้เอง)
 ├── test_images/             ภาพตัวอย่างเล่น ๆ สำหรับ demo pipeline
 └── pipeline_results/        ผลลัพธ์ (generate ได้เอง)
@@ -113,7 +113,7 @@ python pipeline.py --folder test_images --output_dir pipeline_results
 
 # ปรับ threshold / บังคับใช้ CPU / เลือกโมเดล Stage 2
 python pipeline.py --image a.jpg --conf 0.35 --device cpu
-python pipeline.py --image a.jpg --weights runs/detect/train-gray-s2/weights/best.pt
+python pipeline.py --image a.jpg --weights runs/detect/train-gray-n2/weights/best.pt
 ```
 ถ้ามี `thresholds.json` (จาก `tune_thresholds.py`) pipeline จะใช้ per-class conf อัตโนมัติ — ปิดด้วย `--no-class-conf`
 
@@ -189,30 +189,37 @@ python app.py
 
 ## ผลการทดลอง
 
-> ### ⚠️ อัปเดต 2026-09-06 — Data leakage audit + retrain
+> ### ⚠️ อัปเดต 2026-09-06 — Data leakage audit + retrain + multi-seed
 >
-> ตรวจ train/test contamination ด้วย `check_leakage.py` (perceptual hash + pixel cosine):
-> พบชุด Roboflow "Danger-Rust" เป็นภาพถ่ายรัว → split เดิมสุ่มแยกเฟรมติดกันคนละ split
-> → **rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train** (932 คู่)
+> **1) Leakage:** `check_leakage.py` (perceptual hash + pixel cosine) พบชุด Roboflow
+> "Danger-Rust" เป็นภาพถ่ายรัว → split เดิมสุ่มแยกเฟรมติดกันคนละ split →
+> **rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train** (932 คู่)
+> แก้ด้วย `resplit_grouped.py` (group-aware re-split, 80/10/10 → 3338/422/425, leakage = 0)
 >
-> แก้ด้วย `resplit_grouped.py` (group-aware stratified re-split, 80/10/10 → 3338/422/425,
-> leakage = 0) แล้ว retrain: **`train-gray-s2`** (yolo11s) + **`train-gray-n2`** (yolo11n)
+> **2) โมเดลหลักเปลี่ยนเป็น `train-gray-n2` (YOLO11n)** — เล็กกว่า 4x (5.5 MB), เร็วกว่า 2x (~5 ms),
+> และ mAP สูงกว่า YOLO11s:
 >
-> | โมเดล (split สะอาด) | test mAP50 | mAP50-95 | P | R |
-> |---|---|---|---|---|
-> | `train-gray-s2` (yolo11s) — **pipeline ใช้ตัวนี้** | **0.840** | 0.525 | 0.829 | 0.808 |
-> | `train-gray-n2` (yolo11n) | **0.867** | 0.527 | 0.862 | 0.809 |
+> | โมเดล (split สะอาด) | test mAP50 | mAP50-95 | หมายเหตุ |
+> |---|---|---|---|
+> | `train-gray-n2` (yolo11n) — **pipeline ใช้ตัวนี้** | **0.867 ± 0.010** | 0.536 ± 0.009 | multi-seed n=4 |
+> | `train-gray-s2` (yolo11s) | 0.840 | 0.525 | single run (ต่ำกว่า n2 ~2.7σ) |
 >
-> รายคลาส `train-gray-s2` (mAP50 / recall): rust 0.995/1.00 · patches 0.937/0.86 ·
-> scratches 0.930/0.91 · crazing 0.835/0.87 · pitted_surface 0.811/0.77 ·
-> inclusion 0.793/0.74 · rolled-in_scale 0.750/0.68 · **crack 0.667/0.63** (อ่อนสุด)
+> **3) Multi-seed** (`aggregate_seeds.py`, n=4) — รายคลาส mAP50 (mean ± std):
 >
-> **อ่านผล:** overall mAP50 ตกแค่ 0.853 → 0.840 หลังแก้ leakage → ตัวเลขเดิมไม่ได้ผิดมาก
-> และตอนนี้ป้องกันได้ · rust ยังได้ 0.995 แต่เพราะ subset rust เป็นกลุ่มภาพ homogeneous
+> | class | mAP50 | recall | | class | mAP50 | recall |
+> |---|---|---|---|---|---|---|
+> | rust | 0.995 ± 0.00 | 1.00 | | pitted_surface | 0.803 ± 0.025 | 0.756 |
+> | patches | 0.961 ± 0.011 | 0.895 | | rolled-in_scale | 0.819 ± 0.048 | 0.725 |
+> | scratches | 0.947 ± 0.016 | 0.897 | | crazing | 0.867 ± 0.054 | 0.806 |
+> | inclusion | 0.856 ± 0.016 | 0.789 | | **crack** | **0.687 ± 0.011** | **0.606** |
+>
+> **อ่านผล:** overall mAP50 0.853 (เดิม, leaky) → 0.867 ± 0.010 (n2, สะอาด) — ตัวเลขเดิมไม่ได้ผิดมาก
+> และตอนนี้ป้องกันได้ · rust 0.995 คงที่ทุก seed แต่เพราะ subset rust เป็นกลุ่ม homogeneous
 > แยกจาก NEU ง่าย (ดู `error_analysis.docx` EA-4 + `cross_dataset_eval.md`) ไม่ใช่ leakage แล้ว ·
-> yolo11n ≥ yolo11s บน split นี้ → ยืนยันชัดว่า **model size ไม่ใช่ปัจจัยหลัก**
+> **yolo11n > yolo11s → model size ไม่ใช่ปัจจัยหลัก** (เกนมาจาก label สะอาด + grayscale) ·
+> crack อ่อนสุดและ crazing/rolled-in_scale std สูง (ไม่เสถียรข้าม seed)
 >
-> `thresholds.json` (per-class conf) recompute แล้ว: macro-F1 val 0.839 → 0.855
+> `thresholds.json` recompute สำหรับ n2: macro-F1 val 0.824 → 0.844
 >
 > หัวข้อย่อยด้านล่างที่อ้าง `train-gray-s` / `train-gray-n` (ไม่มี "2") เป็นตัวเลข **ก่อนแก้ leakage**
 > เก็บไว้เทียบ before/after — ตัวเลข canonical ให้ยึดตารางนี้
@@ -295,7 +302,7 @@ python app.py
 
 **สรุป:** สำหรับงานตรวจตำหนิ (พลาดตำหนิ = แย่กว่าเตือนเกิน) recall ที่สมดุลขึ้นคุ้มกว่า mAP ที่ขยับนิด
 → train-balanced ดีกว่า train-clean. **ขั้นต่อไป (Tier 1+2) ดันได้อีกมาก — ดูหัวข้อ "Tier 1+2" ด้านล่าง**
-(โมเดลหลักปัจจุบัน = `train-gray-s2` หลังแก้ leakage, `pipeline.py` ชี้ตัวนี้แล้ว — ดูกล่อง ⚠️ ด้านบน)
+(โมเดลหลักปัจจุบัน = `train-gray-n2` หลังแก้ leakage + multi-seed, `pipeline.py` ชี้ตัวนี้แล้ว — ดูกล่อง ⚠️ ด้านบน)
 
 ### ตารางเปรียบเทียบ
 
