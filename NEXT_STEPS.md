@@ -37,8 +37,9 @@ cd C:\Users\Lenovo\steel-defect-detection
 
 **ยังเหลือ — multi-seed (ขั้น 6):**
 
-รันบน **yolo11n** (train-gray-n2 config) เพราะเร็วกว่า ~2x และ ablation แสดงว่า model size
-ไม่ต่างกัน — 3 รอบ ~6 ชม. รวม `train-gray-n2` ที่มีแล้ว (seed 0) เป็น 4 จุด
+รันบน **yolo11n** (train-gray-n2 config) เพราะเร็วกว่า yolo11s และ ablation แสดงว่า model size
+ไม่ต่างกัน — 3 รอบ ~3.5 ชม./รอบ = **~10-12 ชม.** รวม `train-gray-n2` ที่มีแล้ว (seed 0) เป็น 4 จุด
+**รันในหน้าต่าง PowerShell ของคุณเอง** (อยู่ข้ามคืนได้ ไม่ตายตามเซสชัน):
 
 ```powershell
 # seed 1,2,3 (seed 0 = train-gray-n2 มีแล้ว)
