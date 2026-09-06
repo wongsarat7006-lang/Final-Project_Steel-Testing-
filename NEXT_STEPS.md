@@ -35,13 +35,26 @@ cd C:\Users\Lenovo\steel-defect-detection
 **ผลลัพธ์:** overall test mAP50 0.853 → **0.840** (s2) — ตกเล็กน้อย ตัวเลขเดิมเชื่อได้หลังแก้ ;
 `train-gray-n2` 0.867 ≥ s2 → model size ไม่ใช่ปัจจัยหลัก (ยืนยันชัดขึ้น)
 
-**ยังเหลือ:**
+**ยังเหลือ — multi-seed (ขั้น 6):**
+
+รันบน **yolo11n** (train-gray-n2 config) เพราะเร็วกว่า ~2x และ ablation แสดงว่า model size
+ไม่ต่างกัน — 3 รอบ ~6 ชม. รวม `train-gray-n2` ที่มีแล้ว (seed 0) เป็น 4 จุด
+
 ```powershell
-# multi-seed 3 รอบ -> confidence interval (ขั้น 6)
-python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
-                --model yolo11s.pt --name train-gray-s2-seed1 --epochs 120 --batch 6 --seed 1
-#   (ทำซ้ำ seed 2, 3 แล้วรวมเป็น mean ± std ต่อคลาส)
+# seed 1,2,3 (seed 0 = train-gray-n2 มีแล้ว)
+foreach ($s in 1,2,3) {
+  python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
+                  --model yolo11n.pt --name "train-gray-n2-s$s" --epochs 120 --batch 8 --patience 40 --seed $s
+  python evaluate.py --mode stage2 --weights "runs/detect/train-gray-n2-s$s/weights/best.pt" `
+                     --data merged_dataset_gray/data.yaml --out "results/stage2_grayn2_seed$s.json"
+}
+# คัดลอกผล seed 0 ให้ชื่อเข้าชุด
+copy results/stage2_train-gray-n.json results/stage2_grayn2_seed0.json
+
+# รวมเป็น mean ± std
+python aggregate_seeds.py --glob "results/stage2_grayn2_seed*.json" --out results/stage2_multiseed.json
 ```
+→ `results/stage2_multiseed.json` : mAP50 เป็น mean ± std (n=4) ต่อคลาส — ใส่ตารางในเล่มแทนตัวเลขเดียว
 
 ---
 
