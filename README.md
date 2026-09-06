@@ -66,14 +66,12 @@ steel-defect-detection/
 ├── train/ valid/ test/      NEU ดิบจาก Roboflow (source ของ merge_datasets.py — ห้ามลบ)
 ├── rust_dataset/  crack_dataset/            dataset ดิบก่อน merge
 ├── real_test/               ★ ต้องสร้างเอง — ภาพเหล็กถ่ายจริง + labels.csv (ดู prepare_data.md ข้อ 6)
-├── runs/detect/
-│   ├── train/               เทรนครั้งแรก 6 คลาส (30 epochs)
-│   ├── train-2/             เทรน 8 คลาส บน dataset ที่ยังปนเปื้อน (50 epochs)
+├── runs/detect/             (gitignored — เทรนใหม่ได้จาก train.py)
 │   ├── train-clean/         เทรน 8 คลาส dataset สะอาด, augmentation default (baseline)
 │   ├── train-balanced/      เทรน 8 คลาส + oversampling + recipe texture (yolo11n)
-│   ├── train-gray-s/        yolo11s (ก่อนแก้ leakage — เก็บไว้เทียบ)
 │   ├── train-gray-s2/       yolo11s + split สะอาด (เทียบ — model size ablation)
-│   └── train-gray-n2/       yolo11n + split สะอาด  ← pipeline ใช้ best.pt ตัวนี้ (multi-seed n=4)
+│   ├── train-gray-n2/       yolo11n + split สะอาด  ← pipeline ใช้ best.pt ตัวนี้
+│   └── train-gray-n2-s{1,2,3}/  multi-seed (seed 1-3) — seed 0 = train-gray-n2
 ├── figures/                 รูปประกอบรายงาน (generate ได้เอง)
 ├── test_images/             ภาพตัวอย่างเล่น ๆ สำหรับ demo pipeline
 └── pipeline_results/        ผลลัพธ์ (generate ได้เอง)
