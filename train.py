@@ -34,10 +34,12 @@ def main():
     parser.add_argument("--resume", action="store_true", help="เทรนต่อจาก checkpoint ล่าสุด")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0, help="random seed (multi-seed runs)")
-    parser.add_argument("--recipe", default="default", choices=["default", "texture"],
+    parser.add_argument("--recipe", default="default", choices=["default", "texture", "camera"],
                         help="default = augmentation เดิม | "
                              "texture = ลด mosaic/scale เพื่อรักษา texture เต็มภาพ "
-                             "(แก้คลาส crazing/rolled-in_scale ที่โดนมองข้าม)")
+                             "(แก้คลาส crazing/rolled-in_scale ที่โดนมองข้าม) | "
+                             "camera = จำลองภาพถ่ายกล้อง/มือถือจริง (blur, photometric แรง, "
+                             "perspective, erasing) — ใช้กับ merged_dataset (RGB ไม่ grayscale)")
     args = parser.parse_args()
 
     if args.device == "auto":
@@ -79,6 +81,18 @@ def main():
                 hsv_h=0.015, hsv_s=0.3, hsv_v=0.4,
                 degrees=5.0, translate=0.1, scale=0.2, fliplr=0.5, flipud=0.5,
                 mosaic=0.3, close_mosaic=20, mixup=0.0, erasing=0.2,
+                cos_lr=True,
+            )
+        elif args.recipe == "camera":
+            # จำลองภาพถ่ายกล้อง/มือถือจริง: แสง/สมดุลสีไม่คุม, เบลอจากการถือกล้อง,
+            # มุม/เพอร์สเปกทีฟ, บางส่วนถูกบัง. ใช้กับ merged_dataset (RGB) เพื่อเก็บ cue สี
+            # (สนิม = ส้มน้ำตาล). erasing สูง = บังคับให้เรียนตำหนิจาก local texture ไม่ใช่ทั้งภาพ
+            aug = dict(
+                hsv_h=0.03, hsv_s=0.7, hsv_v=0.5,          # white-balance / แสงแปรปรวน
+                degrees=15.0, translate=0.12, scale=0.5,
+                shear=3.0, perspective=0.0005,             # มุมกล้องเอียง
+                fliplr=0.5, flipud=0.3,
+                mosaic=0.6, close_mosaic=15, mixup=0.1, erasing=0.4,
                 cos_lr=True,
             )
         else:

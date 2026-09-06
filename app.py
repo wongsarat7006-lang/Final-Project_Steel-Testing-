@@ -36,6 +36,11 @@ _RISK_COLOR = {
 }
 _HIGH_RISK = ("สูง", "ปานกลาง-สูง")
 
+# โหมดความไว -> ตัวคูณ threshold รายคลาส (ยิ่งต่ำ = ยิ่งเตือนเยอะ)
+_SENS = {"มาตรฐาน": 1.0, "ไว": 0.6, "ไวมาก": 0.4}
+_RAW_FLOOR = 0.12       # conf ต่ำสุดที่ให้ YOLO คืนมา
+_TENTATIVE_FLOOR = 0.30  # ต่ำกว่า threshold แต่ >= ค่านี้ = "อาจมี" (แสดงแยก)
+
 
 def _ensure_models():
     if _STATE["s1"] is None:
@@ -83,24 +88,30 @@ def _empty_banner():
                    "หรือเลือกจากตัวอย่างภาพด้านล่าง")
 
 
-def _status_html(rows):
-    if not rows:
-        return _banner("#e6f4ea", "#1e7e34", "✅ ไม่พบตำหนิพื้นผิว",
-                       "ระบบไม่พบตำหนิในภาพนี้")
-    kinds = sorted({r["name_th"] for r in rows})
-    risky = sorted({r["name_th"] for r in rows if r["risk"] in _HIGH_RISK})
-    if risky:
-        return _banner("#fdecea", "#b71c1c",
-                       "🔴 พบตำหนิความเสี่ยงสูง: " + ", ".join(risky),
-                       f"รวมทั้งหมด {len(kinds)} ชนิด: " + ", ".join(kinds))
-    return _banner("#fff4e5", "#b26a00",
-                   f"⚠️ พบตำหนิ {len(kinds)} ชนิด: " + ", ".join(kinds),
-                   "ไม่มีชนิดที่จัดเป็นความเสี่ยงสูง")
+def _status_html(confirmed, tentative):
+    if confirmed:
+        kinds = sorted({r["name_th"] for r in confirmed})
+        risky = sorted({r["name_th"] for r in confirmed if r["risk"] in _HIGH_RISK})
+        if risky:
+            return _banner("#fdecea", "#b71c1c",
+                           "🔴 พบตำหนิความเสี่ยงสูง: " + ", ".join(risky),
+                           f"รวมทั้งหมด {len(kinds)} ชนิด: " + ", ".join(kinds))
+        return _banner("#fff4e5", "#b26a00",
+                       f"⚠️ พบตำหนิ {len(kinds)} ชนิด: " + ", ".join(kinds),
+                       "ไม่มีชนิดที่จัดเป็นความเสี่ยงสูง")
+    if tentative:
+        kinds = sorted({r["name_th"] for r in tentative})
+        return _banner("#fff8e1", "#8a6d00",
+                       "🔍 อาจมีตำหนิ (ความมั่นใจต่ำ): " + ", ".join(kinds),
+                       "ต่ำกว่าเกณฑ์ — แนะนำให้ตรวจซ้ำด้วยตา หรือเพิ่มโหมดความไว")
+    return _banner("#e6f4ea", "#1e7e34", "✅ ไม่พบตำหนิพื้นผิว",
+                   "ระบบไม่พบตำหนิในภาพนี้ (อาจเป็นภาพนอกโดเมนที่โมเดลไม่คุ้น)")
 
 
-def _table_html(rows):
+def _rows_table(rows, muted=False):
     if not rows:
         return ""
+    op = "opacity:.75;" if muted else ""
     head = ("<tr style='background:#f4f6fa;text-align:left'>"
             "<th style='padding:8px 10px'>บริเวณ</th>"
             "<th style='padding:8px 10px'>ชนิดตำหนิ</th>"
@@ -118,19 +129,33 @@ def _table_html(rows):
             f"<span style='color:#8a929e;font-size:12px'>{r['class']}</span></td>"
             f"<td style='padding:8px 10px'>{r['conf']:.0%}</td>"
             f"<td style='padding:8px 10px'>{chip}</td></tr>")
-    return ("<table style='width:100%;border-collapse:collapse;font-size:14px'>"
+    return (f"<table style='width:100%;border-collapse:collapse;font-size:14px;{op}'>"
             f"<thead>{head}</thead><tbody>{''.join(body)}</tbody></table>")
 
 
-def analyze(image_rgb, conf, detailed, progress=gr.Progress()):
+def _tentative_html(rows):
+    if not rows:
+        return ""
+    return ("<div style='margin-top:6px'><div style='font-weight:700;color:#8a6d00;"
+            "margin-bottom:4px'>🔍 อาจมีตำหนิ — ความมั่นใจต่ำกว่าเกณฑ์ (ตรวจซ้ำด้วยตา)</div>"
+            + _rows_table(rows, muted=True) + "</div>")
+
+
+def analyze(image_rgb, conf, detailed, sensitivity, progress=gr.Progress()):
     if image_rgb is None:
-        return None, None, _empty_banner(), "", ""
+        return None, None, _empty_banner(), "", "", ""
 
     progress(0.1, desc="โหลดโมเดล...")
     s1, s2, device = _ensure_models()
     image_bgr = _to_bgr(image_rgb)
 
-    # ----- Stage 1 : หาพื้นที่ที่เป็นเหล็ก + fallback (เหมือน pipeline.py) -----
+    scale = _SENS.get(sensitivity, 1.0)
+    cc = _STATE["class_conf"] or {}
+
+    def thr(cls):
+        return max(_RAW_FLOOR, cc.get(cls, conf) * scale)
+
+    # ----- Stage 1 : หาพื้นที่ที่เป็นเหล็ก + fallback -----
     progress(0.35, desc="Stage 1: หาพื้นที่เหล็ก...")
     mask = P.run_stage1(s1, image_bgr, device)
     boxes, meta = P.build_regions(mask, image_bgr.shape)
@@ -138,67 +163,88 @@ def analyze(image_rgb, conf, detailed, progress=gr.Progress()):
     n_metal = meta["n_regions"] - (1 if meta["fallback_full_image"] else 0)
     stage1_img = _stage1_view(image_bgr, mask, boxes, meta)
 
-    # ----- Stage 2 : ตรวจตำหนิทุกบริเวณ + แปลง bbox เป็นพิกัดภาพเต็ม -----
+    # ----- Stage 2 : ตรวจตำหนิ (คืนที่ conf ต่ำ แล้วมาแยกเองเป็น confirmed / tentative) -----
     progress(0.55, desc="Stage 2: ตรวจตำหนิ...")
     region_dets = []
     for x, y, w, h in boxes:
         crop = image_bgr[y:y + h, x:x + w]
-        dets = P.run_stage2(s2, crop, conf, device, augment=bool(detailed),
-                            class_conf=_STATE["class_conf"])
+        dets = P.run_stage2(s2, crop, _RAW_FLOOR, device, augment=bool(detailed),
+                            class_conf=None)
+        keep = []
         for d in dets:
+            t = thr(d["class"])
+            if d["confidence"] >= t:
+                d["_status"] = "ok"
+            elif d["confidence"] >= _TENTATIVE_FLOOR:
+                d["_status"] = "maybe"
+            else:
+                continue
             cx1, cy1, cx2, cy2 = d["bbox_xyxy_crop"]
             d["bbox_xyxy_global"] = [cx1 + x, cy1 + y, cx2 + x, cy2 + y]
-        region_dets.append(dets)
+            keep.append(d)
+        region_dets.append(keep)
 
-    # ----- Cross-region NMS: ตัด detection ซ้ำจากกรอบทับกัน / fallback ทั้งภาพ -----
+    # ----- Cross-region NMS (รวม confirmed + tentative) -----
     progress(0.8, desc="รวมผล...")
     flat = [d for dets in region_dets for d in dets]
     kept_ids = {id(d) for d in P.cross_region_nms(flat, iou_thresh=0.5)}
 
     annotated = image_bgr.copy()
-    rows = []
+    confirmed, tentative = [], []
     for i, (x, y, w, h) in enumerate(boxes):
-        detections = [d for d in region_dets[i] if id(d) in kept_ids]
+        dets = [d for d in region_dets[i] if id(d) in kept_ids]
         is_full = meta["fallback_full_image"] and i == len(boxes) - 1
         tag = "ทั้งภาพ" if is_full else f"#{i + 1}"
-        box_col = (0, 165, 255) if is_full else (0, 255, 0)
-        cv2.rectangle(annotated, (x, y), (x + w, y + h), box_col, 2)
+        cv2.rectangle(annotated, (x, y), (x + w, y + h),
+                      (0, 165, 255) if is_full else (0, 255, 0), 2)
 
-        if detections:
-            top = detections[0]
-            info = P.DEFECT_INFO[top["class"]]
+        ok = [d for d in dets if d["_status"] == "ok"]
+        mb = [d for d in dets if d["_status"] == "maybe"]
+        if ok:
+            top = P.DEFECT_INFO[ok[0]["class"]]
             annotated = P.draw_thai_text(
-                annotated, f"{info['name_th']} ({top['confidence']:.0%})",
-                (x, y - 28), color_bgr=(0, 0, 255),
-            )
-            for d in detections:
-                gx1, gy1, gx2, gy2 = (int(v) for v in d["bbox_xyxy_global"])
-                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), (0, 0, 255), 2)
-                di = P.DEFECT_INFO[d["class"]]
-                rows.append({"tag": tag, "class": d["class"], "name_th": di["name_th"],
-                             "conf": d["confidence"], "risk": di["risk"]})
-        else:
+                annotated, f"{top['name_th']} ({ok[0]['confidence']:.0%})",
+                (x, y - 28), color_bgr=(0, 0, 255))
+        elif mb:
+            top = P.DEFECT_INFO[mb[0]["class"]]
+            annotated = P.draw_thai_text(
+                annotated, f"อาจเป็น {top['name_th']} ({mb[0]['confidence']:.0%})?",
+                (x, y - 28), color_bgr=(0, 140, 200))
+        elif not any(dd["_status"] == "ok" for reg in region_dets for dd in reg):
             annotated = P.draw_thai_text(annotated, f"เหล็ก {tag} ปกติ",
                                          (x, y - 28), color_bgr=(0, 150, 0))
 
-    rows.sort(key=lambda r: (_RISK_ORDER.get(r["risk"], 9), -r["conf"]))
+        for d in dets:
+            gx1, gy1, gx2, gy2 = (int(v) for v in d["bbox_xyxy_global"])
+            di = P.DEFECT_INFO[d["class"]]
+            row = {"tag": tag, "class": d["class"], "name_th": di["name_th"],
+                   "conf": d["confidence"], "risk": di["risk"]}
+            if d["_status"] == "ok":
+                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), (0, 0, 255), 2)
+                confirmed.append(row)
+            else:
+                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), (0, 140, 200), 1)
+                tentative.append(row)
 
-    # ----- ข้อมูลเทคนิค (ย่อ) -----
+    confirmed.sort(key=lambda r: (_RISK_ORDER.get(r["risk"], 9), -r["conf"]))
+    tentative.sort(key=lambda r: -r["conf"])
+
+    # ----- ข้อมูลเทคนิค -----
     notes = []
     if meta["fallback_full_image"]:
-        notes.append("Stage 1 เจอเหล็กน้อย (%.0f%%) จึงเพิ่มการตรวจทั้งภาพเป็น fallback"
-                     % (metal_ratio * 100))
+        notes.append("Stage 1 เจอเหล็กน้อย (%.0f%%) จึงตรวจทั้งภาพเป็น fallback" % (metal_ratio * 100))
     if _STATE["class_conf"]:
-        notes.append("ใช้ threshold รายคลาส (thresholds.json); สไลเดอร์ conf เป็นค่าขั้นต่ำเท่านั้น")
+        notes.append(f"โหมดความไว: {sensitivity} (threshold รายคลาส × {scale:g})")
     if detailed:
         notes.append("เปิดโหมดตรวจละเอียด (test-time augmentation)")
-    info_md = ("`Stage 1: %d บริเวณ · เหล็กครอบคลุม %.0f%%`  `Stage 2: %d จุด`  `อุปกรณ์: %s`"
-               % (n_metal, metal_ratio * 100, len(rows), device))
+    info_md = ("`Stage 1: %d บริเวณ · เหล็กครอบคลุม %.0f%%`  `Stage 2: %d จุด (+%d อาจมี)`  `อุปกรณ์: %s`"
+               % (n_metal, metal_ratio * 100, len(confirmed), len(tentative), device))
     if notes:
         info_md += "\n\n" + "\n".join("- " + n for n in notes)
 
     return (cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), stage1_img,
-            _status_html(rows), _table_html(rows), info_md)
+            _status_html(confirmed, tentative), _rows_table(confirmed),
+            _tentative_html(tentative), info_md)
 
 
 def build_ui():
@@ -216,29 +262,32 @@ def build_ui():
         )
 
         with gr.Row(equal_height=False):
-            # ---------- ซ้าย: อินพุต ----------
             with gr.Column(scale=5):
                 inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ",
                                height=340, sources=["upload", "clipboard"])
                 btn = gr.Button("ตรวจสอบอีกครั้ง", variant="primary", size="lg")
                 gr.Markdown("<sub>อัปโหลด/วางภาพ แล้วระบบตรวจให้อัตโนมัติ</sub>")
+                sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
+                                label="โหมดความไว",
+                                info="ภาพถ่ายเองที่โมเดลไม่คุ้น ลองเพิ่มเป็น “ไว/ไวมาก” "
+                                     "(เตือนเยอะขึ้น แต่พลาดน้อยลง)")
                 if samples:
                     gr.Examples(examples=samples, inputs=inp, label="ตัวอย่างภาพ (กดเพื่อตรวจ)",
                                 examples_per_page=12)
                 with gr.Accordion("ตัวเลือกขั้นสูง", open=False):
                     conf = gr.Slider(0.1, 0.9, value=0.4, step=0.05,
-                                     label="Confidence ขั้นต่ำ (Stage 2)",
-                                     info="ค่ายิ่งสูง = เตือนน้อยลง; ระบบใช้ threshold รายคลาสเป็นหลักอยู่แล้ว")
+                                     label="Confidence ขั้นต่ำ (คลาสที่ไม่มีใน thresholds.json)")
                     detailed = gr.Checkbox(
                         value=False, label="ตรวจละเอียด (test-time augmentation)",
                         info="ช้าลง ~2–3 เท่า, recall ดีขึ้นเล็กน้อย")
 
-            # ---------- ขวา: ผลลัพธ์ ----------
             with gr.Column(scale=7):
                 status = gr.HTML(_empty_banner())
-                out_img = gr.Image(type="numpy", label="ผลตรวจ (กรอบแดง = ตำหนิ, กรอบเขียว = บริเวณเหล็ก)",
+                out_img = gr.Image(type="numpy",
+                                   label="ผลตรวจ (แดงทึบ = ตำหนิ, ส้มบาง = อาจมี, เขียว = บริเวณเหล็ก)",
                                    height=380)
                 table = gr.HTML()
+                tentative = gr.HTML()
                 with gr.Accordion("รายละเอียดการทำงาน (Stage 1 + เทคนิค)", open=False):
                     out_s1 = gr.Image(type="numpy",
                                       label="Stage 1 — พื้นที่ที่เป็นเหล็ก (เขียว) / fallback ทั้งภาพ (ส้ม)",
@@ -248,14 +297,14 @@ def build_ui():
         gr.Markdown(
             "<sub>Stage 1: DMS46 หาพื้นที่โลหะ → Stage 2: YOLO11n (เทรนบน grayscale — "
             "ระบบแปลงภาพเป็นขาวดำก่อนตรวจอัตโนมัติ). โมเดลเทรนจากชุด NEU-DET + Roboflow "
-            "อาจไม่แม่นกับภาพสไตล์อื่น</sub>"
+            "อาจไม่แม่นกับภาพสไตล์อื่น — ใช้โหมดความไวช่วยได้บ้าง</sub>"
         )
 
-        outputs = [out_img, out_s1, status, table, info]
-        btn.click(analyze, inputs=[inp, conf, detailed], outputs=outputs)
-        # กดตัวอย่าง -> เซ็ตรูป -> ตรวจอัตโนมัติ
-        inp.change(analyze, inputs=[inp, conf, detailed], outputs=outputs,
-                   show_progress="minimal")
+        outputs = [out_img, out_s1, status, table, tentative, info]
+        ins = [inp, conf, detailed, sens]
+        btn.click(analyze, inputs=ins, outputs=outputs)
+        inp.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
+        sens.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
     return demo
 
 
