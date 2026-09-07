@@ -25,6 +25,22 @@
 ใส่เป็น positive แล้ว `python make_gate_dataset.py && python train_gate.py` ใหม่
 → รากปัญหาเดียวกับทั้งโปรเจค: **ขาดภาพเหล็กในสภาพใช้งานจริง**
 
+### Round 2 — train-real2 (2026-09-07)
+Import 4 dataset ใน `downloads/` (corrosion-detection-sb1, rust-detect-1350, rust-detection-small,
+corrosion-and-cracks) = **1022 ภาพสนิม scene จริง** → `dataset_real/round2` → merge → fine-tune จาก
+train-real1 → **`train-real2`** (OOM ตาย ~epoch 81/100 แต่ val plateau แล้ว, best.pt ใช้ได้)
+- lab benchmark: mAP50 0.853 → **0.866** (กลับมาระดับเล่มจบ) ; ไม่มีคลาสไหนตก
+- real-photo rust: 6/11 → **7/11 ภาพ** + conf สูงขึ้นชัด (0.23→0.51, 0.61→0.79)
+- `thresholds_real2.json` (tune บน lab val, rust override 0.15) ; `app.py` "ปรับโดเมน" ชี้ตัวนี้แล้ว
+- **ยังเป็นสนิมอย่างเดียว** — 6 คลาส texture ไม่มี dataset เปิดแนว scene
+
+**Round 3 ถ้าจะทำต่อ:** เทรน train-real2 ให้ครบ 100 epoch (รันใน terminal คุณเอง กัน OOM):
+```powershell
+python train.py --recipe camera --data merged_dataset/data_oversampled.yaml `
+                --model runs/detect/train-real1/weights/best.pt --name train-real2 --resume
+```
+หรือหาภาพจริงของ scratches/pitted/crack-on-metal มาเพิ่ม
+
 รันทุกคำสั่งจากโฟลเดอร์ `C:\Users\Lenovo\steel-defect-detection` โดย **activate venv ก่อน**:
 
 ```powershell
