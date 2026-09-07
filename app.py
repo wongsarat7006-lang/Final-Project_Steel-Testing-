@@ -16,6 +16,7 @@ import numpy as np
 from ultralytics import YOLO
 
 import pipeline as P
+import steel_gate
 
 try:
     import gradio as gr
@@ -187,9 +188,9 @@ def _rows_table(confirmed, tentative):
             f"<tbody>{''.join(body)}</tbody></table>")
 
 
-def analyze(image_rgb, conf, detailed, sensitivity, model_key, progress=gr.Progress()):
+def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress=gr.Progress()):
     try:
-        return _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress)
+        return _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress)
     except Exception as e:                       # เดโมต้องไม่ค้าง — โชว์ error เป็นการ์ดแทน stack trace
         import traceback
         traceback.print_exc()
@@ -198,13 +199,18 @@ def analyze(image_rgb, conf, detailed, sensitivity, model_key, progress=gr.Progr
                 "", f"`{type(e).__name__}: {e}`")
 
 
-def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
+def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress):
     if image_rgb is None:
         return None, None, _empty_banner(), "", ""
 
+    image_bgr = _to_bgr(image_rgb)
+
+    # Stage 0: P(พื้นผิวเหล็ก) — ใช้เป็น "เสียงโหวตเดียว" ตอนสรุปผล ไม่บล็อกเดี่ยว ๆ
+    # (classifier ยัง overfit ไป lab crop — real steel photo ได้ P ต่ำ จึงไม่ยอมให้มัน veto)
+    gate_p = steel_gate.steel_prob(image_bgr) if gate_on else None
+
     progress(0.1, desc="โหลดโมเดล...")
     s1, s2, device = _ensure_models(model_key)
-    image_bgr = _to_bgr(image_rgb)
 
     scale = _SENS.get(sensitivity, 1.0)
     cc = _STATE["class_conf"] or {}
@@ -299,6 +305,12 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
     # ----- ข้อมูลเทคนิค -----
     notes = [f"โมเดล Stage 2: {_STATE.get('s2_key', model_key)}"
              + ("  (แปลง crop เป็นขาวดำก่อนตรวจ)" if getattr(s2, "_steel_gray", False) else "")]
+    if gate_p is not None:
+        notes.append(f"Stage 0: ตัวจำแนกพื้นผิวประเมิน P(เหล็ก) = {gate_p:.0%}"
+                     + ("  (ต่ำ — classifier ยัง bias ไปภาพแล็บ ใช้ประกอบเท่านั้น)"
+                        if gate_p < 0.5 else ""))
+    elif gate_on:
+        notes.append("Stage 0: ยังไม่มีโมเดล gate (รัน train_gate.py) — ข้ามการเช็คพื้นผิวเหล็ก")
     if meta["fallback_full_image"]:
         notes.append("Stage 1 เจอเหล็กน้อย (%.0f%%) จึงตรวจทั้งภาพเป็น fallback" % (metal_ratio * 100))
     if _STATE["class_conf"]:
@@ -310,9 +322,20 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
     if notes:
         info_md += "\n\n" + "\n".join("- " + n for n in notes)
 
+    # "ไม่พบพื้นผิวเหล็ก" — เชื่อได้เฉพาะตอนทุกสัญญาณเงียบพร้อมกัน:
+    #   ตัวจำแนกพื้นผิว P(เหล็ก) ต่ำมาก  +  DMS46 เจอโลหะ ~0%  +  Stage 2 ไม่เจอตำหนิเลย
+    # (classifier ยัง bias ไปภาพแล็บ จึงไม่ให้มัน veto detection ที่ Stage 2 มั่นใจ)
+    no_steel = (gate_p is not None and gate_p < 0.10
+                and metal_ratio < 0.02 and not confirmed and not tentative)
+    if no_steel:
+        status = _card("neutral", "ไม่พบพื้นผิวเหล็กในภาพนี้",
+                       f"ทั้ง Stage 1, Stage 2 และตัวจำแนกพื้นผิว ({gate_p:.0%}) "
+                       f"เห็นตรงกันว่าภาพนี้ไม่ใช่พื้นผิวเหล็ก")
+    else:
+        status = _status_html(confirmed, tentative)
+
     return (cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), stage1_img,
-            _status_html(confirmed, tentative),
-            _rows_table(confirmed, tentative), info_md)
+            status, _rows_table(confirmed, tentative), info_md)
 
 
 def _globs(d):
@@ -402,6 +425,12 @@ def build_ui():
                     detailed = gr.Checkbox(
                         value=False, label="ตรวจละเอียด (test-time augmentation)",
                         info="ช้าลงราว 2–3 เท่า แลกกับ recall ที่ดีขึ้นเล็กน้อย")
+                    gate_on = gr.Checkbox(
+                        value=steel_gate.available(), interactive=steel_gate.available(),
+                        label="Stage 0: ตัวจำแนกพื้นผิวเหล็ก",
+                        info=("ช่วยตอบ ไม่พบพื้นผิวเหล็ก เมื่อ Stage 1/2 และตัวจำแนกเห็นตรงกันว่าไม่ใช่เหล็ก"
+                              if steel_gate.available()
+                              else "ยังไม่มีโมเดล gate — รัน train_gate.py ก่อน"))
                     btn = gr.Button("ประมวลผลใหม่", variant="secondary", size="sm")
 
             with gr.Column(scale=6, min_width=340):
@@ -429,11 +458,12 @@ def build_ui():
         )
 
         outputs = [out_img, out_s1, status, table, info]
-        ins = [inp, conf, detailed, sens, model_sel]
+        ins = [inp, conf, detailed, sens, model_sel, gate_on]
         btn.click(analyze, inputs=ins, outputs=outputs)
         inp.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
         sens.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
         model_sel.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
+        gate_on.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
 
         if real_samples:
             gr.Examples(examples=real_samples, inputs=inp, label="ภาพถ่ายจริง",
