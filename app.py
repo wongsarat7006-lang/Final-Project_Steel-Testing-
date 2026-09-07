@@ -263,20 +263,22 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progres
 
         ok = [d for d in dets if d["_status"] == "ok"]
         mb = [d for d in dets if d["_status"] == "maybe"]
-        ly = max(y - fpx - 8, 4)
+        # ป้ายกำกับ: ปกติวางเหนือกรอบ แต่ถ้าไม่มีที่ (กรอบชิดขอบบน / เต็มภาพ) ให้วางในกรอบ เยื้องเข้ามาเล็กน้อย
+        lx = min(max(x + 4, 4), annotated.shape[1] - 6)
+        ly = y - fpx - 10 if y - fpx - 10 >= 2 else y + 6
         if ok:
             top = P.DEFECT_INFO[ok[0]["class"]]
             annotated = P.draw_thai_text(
                 annotated, f"{top['name_th']} ({ok[0]['confidence']:.0%})",
-                (x, ly), color_bgr=C_OK, font_size=fpx)
+                (lx, ly), color_bgr=C_OK, font_size=fpx)
         elif mb:
             top = P.DEFECT_INFO[mb[0]["class"]]
             annotated = P.draw_thai_text(
                 annotated, f"อาจเป็น {top['name_th']} ({mb[0]['confidence']:.0%})?",
-                (x, ly), color_bgr=C_MAYBE, font_size=fpx)
+                (lx, ly), color_bgr=C_MAYBE, font_size=fpx)
         elif not any(dd["_status"] == "ok" for reg in region_dets for dd in reg):
             annotated = P.draw_thai_text(annotated, f"เหล็ก {tag} ปกติ",
-                                         (x, ly), color_bgr=(0, 150, 0), font_size=fpx)
+                                         (lx, ly), color_bgr=(0, 150, 0), font_size=fpx)
 
         for d in dets:
             gx1, gy1, gx2, gy2 = (int(v) for v in d["bbox_xyxy_global"])

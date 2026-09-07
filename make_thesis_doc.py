@@ -82,11 +82,88 @@ def _ar(ax, p1, p2, txt=None, dashed=False, fs=8):
                 va="center", bbox=dict(fc="white", ec="none", pad=1), zorder=6)
 
 
-def _save(fig, name):
-    fig.savefig(FIG / name, dpi=175, bbox_inches="tight", facecolor="white")
+def _save(fig, name, dpi=200):
+    fig.savefig(FIG / name, dpi=dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print("  figure:", name)
     return name
+
+
+# --- ภาพ: Wireframe หน้าเว็บ (ตรงกับ app.py ปัจจุบัน) ---
+def fig_wireframe():
+    fig, ax = _canvas(100, 82, w=10.0)
+    ax.text(50, 80, "โครงหน้าจอหน้าเว็บ (Wireframe) — app.py", ha="center",
+            fontsize=13, fontweight="bold")
+    _rbox(ax, 3, 71, 94, 6.5,
+          "หัวเรื่อง : ตรวจจับตำหนิพื้นผิวเหล็ก  ·  Stage 1 DMS46 → Stage 2 YOLO11n (8 คลาส)  "
+          "·  prototype เพื่อการศึกษา", GREYS["soft"], 9.5)
+    # แถวอินพุต/ผลสรุป
+    lc = _rbox(ax, 3, 34, 46, 35, "", GREYS["box"], 9)
+    rc = _rbox(ax, 51, 34, 46, 35, "", GREYS["box"], 9)
+    ax.text(6, 66, "ซ้าย : อินพุต", fontsize=9.5, fontweight="bold")
+    ax.text(54, 66, "ขวา : ผลสรุป", fontsize=9.5, fontweight="bold")
+    _rbox(ax, 6, 52, 40, 11, "ภาพเหล็กที่จะตรวจ\n(อัปโหลด / วางภาพ)", GREYS["proc"], 9)
+    _rbox(ax, 6, 46.5, 22, 4.2, "[  ตรวจสอบ  ]", GREYS["accent"], 9)
+    _rbox(ax, 6, 41, 40, 4.2, "▸ ตัวเลือกขั้นสูง : โมเดล · ความไว · conf · TTA · Stage 0", GREYS["soft"], 7.8)
+    _rbox(ax, 6, 35.5, 40, 4.2, "ภาพตัวอย่าง (กดเพื่อตรวจ)", GREYS["soft"], 8.5)
+    _rbox(ax, 54, 55, 40, 8,
+          "การ์ดสรุปผล :\nพบตำหนิ N ชนิด / ความเสี่ยงสูง: … / ไม่พบตำหนิ", GREYS["proc"], 8.4)
+    _rbox(ax, 54, 36, 40, 16,
+          "ตารางรายการตำหนิ (เรียงตามความเสี่ยง)\n\n"
+          "บริเวณ | ชนิดตำหนิ | คลาส | ความมั่นใจ | ความเสี่ยง", GREYS["proc"], 8.6)
+    # ภาพผลลัพธ์ + Stage 1 (เต็มความกว้าง)
+    _rbox(ax, 3, 18, 94, 13,
+          "ภาพผลลัพธ์  (กรอบแดง = ตำหนิที่ยืนยัน · กรอบส้ม = อาจมี · กรอบเขียว = บริเวณที่เป็นเหล็ก)",
+          GREYS["soft"], 9)
+    _rbox(ax, 3, 4, 94, 12,
+          "Stage 1 — พื้นที่ที่เป็นเหล็ก  (พื้น/กรอบเขียว = เหล็ก · ส้ม = ตรวจทั้งภาพ (fallback))",
+          GREYS["soft"], 9)
+    ax.text(50, 1.5, "เหตุการณ์ :  btn.click / inp.change → analyze(image, conf, detailed, sensitivity, "
+            "model, gate) → [result_img, stage1_img, verdict, table, info]",
+            ha="center", fontsize=7.6, color="#555")
+    return _save(fig, "th_wireframe.png")
+
+
+def gen_result_figs():
+    """เรนเดอร์ภาพตัวอย่างผลการตรวจใหม่ ขยายภาพต้นทางก่อนเพื่อให้กรอบ/ป้ายคมชัดในเอกสาร"""
+    import cv2
+    import app as APP
+
+    class _P:
+        def __call__(self, *a, **k):
+            pass
+
+    prog = _P()
+    mk = list(APP._available_models())[0]
+    jobs = [
+        ("test_images/crazing_example.jpg", "มาตรฐาน", "res_crazing.jpg"),
+        ("test_images/scratches_example.jpg", "มาตรฐาน", "res_scratches.jpg"),
+        ("test_images/patches_example.jpg", "มาตรฐาน", "res_patches.jpg"),
+        ("real_test/images/real_003_rebar_stack_rust.jpg", "ไว", "res_rust.jpg"),
+        ("real_test/images/real_012.jpg", "ไว", "res_rust2.jpg"),
+    ]
+    models = list(APP._available_models())
+    cmp_src = "real_test/images/real_003_rebar_stack_rust.jpg"
+    if len(models) >= 2:
+        jobs += [(cmp_src, "ไว", "res_adapted_model.jpg", models[0]),
+                 (cmp_src, "ไว", "res_thesis_model.jpg", models[1])]
+
+    for job in jobs:
+        src, sens, out = job[0], job[1], job[2]
+        use_mk = job[3] if len(job) > 3 else mk
+        im = cv2.imread(str(BASE / src))
+        if im is None:
+            print("  (ข้ามภาพผล:", src, ")")
+            continue
+        h, w = im.shape[:2]
+        scale = max(1.0, 1400 / max(h, w))          # ขยายให้ด้านยาว ~1400 px
+        if scale > 1.01:
+            im = cv2.resize(im, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+        rgb = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        ann = APP._analyze(rgb, 0.4, False, sens, use_mk, False, prog)[0]
+        cv2.imwrite(str(FIG / out), cv2.cvtColor(ann, cv2.COLOR_RGB2BGR),
+                    [cv2.IMWRITE_JPEG_QUALITY, 92])
+        print("  result:", out)
 
 
 # --- ภาพ: กรอบแนวคิดการศึกษา (conceptual framework) ---
@@ -642,7 +719,7 @@ def build_front_and_ch12(figs):
         "โครงงานนี้ใช้ YOLO11 รุ่นเล็ก (yolo11n) ซึ่งมีพารามิเตอร์น้อย เหมาะกับเครื่องที่มีทรัพยากรจำกัด "
         "และได้ผลใกล้เคียงรุ่นใหญ่กว่าในโดเมนนี้ ตัวอย่างผลการตรวจจับของระบบแสดงในภาพ 2")
     D.figure("res_rust.jpg", "ตัวอย่างผลการตรวจจับตำหนิของระบบ — สนิม (rust) บนเหล็กเส้น "
-             "พร้อมกรอบ ป้ายชนิดภาษาไทย และค่าความมั่นใจ", width=4.6)
+             "พร้อมกรอบ ป้ายชนิดภาษาไทย และค่าความมั่นใจ", width=5.6)
 
     D.h("6. Material Segmentation (DMS46) สำหรับการระบุบริเวณโลหะ", 2)
     D.p("DMS46 (Dense Material Segmentation, Apple) เป็นแบบจำลองแบ่งส่วนภาพตามชนิดวัสดุ 46 ประเภทที่ฝึกมา "
@@ -735,8 +812,14 @@ if __name__ == "__main__":
         "flowmain": fig_flow_main(),
         "flowpre": fig_flow_pre(),
         "classdist": fig_class_dist(),
+        "wireframe2": fig_wireframe(),
     }
     figs.update(gen_reused_figs())
+    print("1b) เรนเดอร์ภาพตัวอย่างผลการตรวจ (ความละเอียดสูง) ...")
+    try:
+        gen_result_figs()
+    except Exception as e:
+        print("  (ข้าม gen_result_figs:", e, ")")
     print("2) ประกอบเล่ม ...")
     D = build_front_and_ch12(figs)
     TC.chapter3(D, figs)
