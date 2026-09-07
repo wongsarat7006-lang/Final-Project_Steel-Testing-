@@ -39,6 +39,24 @@ train-real1 → **`train-real2`** (OOM ตาย ~epoch 81/100)
 **ถ้าจะทำ round 2 ให้ดีจริง:** เทรนแบบ freeze backbone / lr ต่ำ / ผสม lab crop เข้าไปด้วย
 (กัน forgetting) และเทรนให้ครบ epoch ใน terminal เอง
 
+### train-dr — domain randomization recipe (2026-09-07) — ⚠️ ต้องเทรนเองใน terminal
+โค้ดพร้อมแล้ว: `train.py --recipe domainrand` (aug แรงสุด — hsv 0.05/0.9/0.6, scale 0.9,
+perspective/shear, copy_paste 0.3, randaugment, erasing 0.5) + `pipeline.run_stage2_multiscale()`
+(ตรวจ 640/960/1280 + ตัดไทล์ ; checkbox "ตรวจหลายสเกล" ใน app.py แล้ว)
+
+**background training ของ agent โดน OOM kill 3 ครั้ง** (RTX 3050 6GB + เบราว์เซอร์/Claude กิน RAM) —
+`train-dr/best.pt` ตอนนี้ mAP50 แค่ ~0.67 (undertrained ~epoch 20) **อย่าเพิ่งใช้**
+
+รันเองใน PowerShell (ปิดเบราว์เซอร์/โปรแกรมหนักก่อน, อยู่ข้ามคืนได้):
+```powershell
+cd C:\Users\Lenovo\steel-defect-detection
+.\venv\Scripts\python.exe make_oversampled_list.py --dataset merged_dataset
+.\venv\Scripts\python.exe train.py --recipe domainrand --data merged_dataset/data_oversampled.yaml `
+    --model yolo11n.pt --name train-dr --epochs 100 --batch 6 --patience 30 --device 0
+# ถ้า OOM: --batch 4  ;  ตายกลางคัน: เพิ่ม --resume (มี last.pt ทุก epoch)
+```
+เสร็จแล้วส่งกลับให้ agent: `runs/detect/train-dr/weights/best.pt` → จะ tune_thresholds + เสียบ app + วัดผล
+
 **Round 3 ถ้าจะทำต่อ:** เทรน train-real2 ให้ครบ 100 epoch (รันใน terminal คุณเอง กัน OOM):
 ```powershell
 python train.py --recipe camera --data merged_dataset/data_oversampled.yaml `
