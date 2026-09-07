@@ -1,5 +1,6 @@
 """
-Prototype UI: อัปโหลดภาพเหล็ก -> ระบบตรวจ 2 ขั้นตอน -> แสดงกรอบเหล็ก + ตารางตำหนิ
+Prototype UI (Gradio): อัปโหลด / วางภาพ / ถ่ายจากกล้อง -> ระบบตรวจ 2 ขั้นตอน
+-> การ์ดสรุปผล + ตารางรายการตำหนิ + ภาพผลลัพธ์ + ภาพ Stage 1
 
 รัน:
     python app.py                 # เปิดที่ http://127.0.0.1:7860 (และวง LAN เดียวกัน)
@@ -7,6 +8,7 @@ Prototype UI: อัปโหลดภาพเหล็ก -> ระบบต�
     python app.py --local-only    # เปิดเฉพาะเครื่องนี้
 
 ต้องมี gradio:  pip install gradio
+หมายเหตุ: การถ่ายจากกล้องในเบราว์เซอร์ต้องเปิดผ่าน https หรือ localhost (127.0.0.1)
 """
 import sys
 from pathlib import Path
@@ -413,9 +415,9 @@ def build_ui():
             # ----- ซ้าย: อินพุต -----
             with gr.Column(scale=5, min_width=300):
                 inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ",
-                               height=280, sources=["upload", "clipboard"])
-                gr.HTML("<div class='hint'>อัปโหลดหรือวางภาพ แล้วระบบตรวจให้อัตโนมัติ "
-                        "(หรือกดปุ่มด้านล่างเพื่อตรวจซ้ำ)</div>")
+                               height=280, sources=["upload", "webcam", "clipboard"])
+                gr.HTML("<div class='hint'>อัปโหลด · วางภาพ · หรือถ่ายจากกล้อง "
+                        "(กดไอคอนกล้องในกรอบ แล้วถ่าย) — ระบบตรวจให้อัตโนมัติ</div>")
                 btn = gr.Button("ตรวจสอบ", variant="primary", size="lg")
                 with gr.Accordion("ตัวเลือกขั้นสูง", open=False):
                     model_sel = gr.Radio(
@@ -518,8 +520,10 @@ if __name__ == "__main__":
             print(f"คนอื่นในวง wifi/LAN เดียวกัน เปิดที่ http://{lan_ip}:{args.port}")
         print("  (ถ้าเข้าจากเครื่องอื่นไม่ได้ ให้เช็ค Windows Firewall — "
               f"ต้องอนุญาต inbound พอร์ต {args.port} สำหรับเครือข่ายส่วนตัว/Private)")
+        print("  หมายเหตุกล้อง: การถ่ายจากกล้องบนมือถือ/เครื่องอื่นผ่าน http://<LAN-IP> จะถูกเบราว์เซอร์บล็อก")
+        print("               ถ้าจะให้ถ่ายกล้องได้ ใช้  python app.py --share  (ลิงก์ *.gradio.live เป็น https)")
     if args.share:
-        print("กำลังสร้างลิงก์สาธารณะ *.gradio.live ... (รอสักครู่)")
+        print("กำลังสร้างลิงก์สาธารณะ *.gradio.live ... (รอสักครู่ — ลิงก์นี้ถ่ายจากกล้องได้)")
     print()
 
     build_ui().queue().launch(
