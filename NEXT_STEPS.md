@@ -5,6 +5,26 @@
 > ที่เหลือเป็น optional: ขยาย real_test ให้ครบคลาส + เติม URL, และราง product (`DATA_COLLECTION.md`)
 > รายละเอียดผลล่าสุดอยู่ใน `thesis_notes.md` (ตารางท้ายไฟล์) และ README หัวข้อ "Pipeline end-to-end vs Baseline"
 
+---
+
+## ราง product/เดโม — generalization + Stage 0 steel gate (2026-09-07)
+
+**เป้า:** (a) ตรวจภาพเหล็กที่ไม่เคยเห็นได้ดีขึ้น (b) ภาพที่ไม่มีเหล็ก → ตอบ "ไม่พบพื้นผิวเหล็ก"
+
+**ลองแล้วไม่เวิร์ก:** YOLO-World / COCO / DMS46 histogram zero-shot — ทั้งหมด noise ในโดเมนนี้
+
+**ทำไปแล้ว — Stage 0 classifier "เหล็ก/ไม่เหล็ก"** (`make_gate_dataset.py` → `train_gate.py` → `steel_gate.py`):
+- yolo11n-cls, positive = merged steel (ตัด crack_ = คอนกรีต), negative = DTD + Imagenette + คอนกรีต
+- val top-1 0.998 แต่ **หลอกตา** — DTD/Imagenette แยกจาก lab crop ง่ายเกิน
+- ของจริง: **overfit ไป lab domain** — ภาพเหล็ก scene จริง (เหล็กเส้น/ประตูสนิม) ได้ P(เหล็ก) 0.00–0.25
+- `app.py` เลยใช้แบบ **advisory** — ขึ้น "ไม่พบพื้นผิวเหล็ก" เฉพาะตอน gate + DMS46 + Stage 2 เงียบพร้อมกัน
+- จับได้: เอกสาร/สัตว์/ปูนฉาบ + ~ครึ่งของภาพสุ่ม ; จับไม่ได้: ภาพไม่ใช่เหล็กที่ Stage 2 หลอนว่าเจอตำหนิ
+
+**ขั้นต่อไปถ้าจะให้ gate ใช้ได้จริง:** เก็บภาพ "เหล็ก/โลหะ scene จริง" ~600 ภาพจากเน็ต
+(เหล็กเส้น, ท่อ, รั้ว, แผ่น, เครื่องมือ, สนิม — สไตล์เดียวกับ `import_labeled.py` round1)
+ใส่เป็น positive แล้ว `python make_gate_dataset.py && python train_gate.py` ใหม่
+→ รากปัญหาเดียวกับทั้งโปรเจค: **ขาดภาพเหล็กในสภาพใช้งานจริง**
+
 รันทุกคำสั่งจากโฟลเดอร์ `C:\Users\Lenovo\steel-defect-detection` โดย **activate venv ก่อน**:
 
 ```powershell
