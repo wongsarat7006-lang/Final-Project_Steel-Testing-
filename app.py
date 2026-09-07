@@ -26,15 +26,17 @@ except ImportError:
 BASE_DIR = Path(__file__).resolve().parent
 
 # โมเดล Stage 2 ที่เลือกได้ในหน้าเดโม — key = ป้ายในหน้าจอ, value = (weights, per-class thresholds)
-# "ปรับโดเมน" (train-real2) = train-gray-n2 config + ภาพสนิมจริง 672 (round1) + 1022 (round2, scene จริง)
-#   -> lab mAP50 0.866 ; real-photo rust recall/confidence ดีกว่า train-real1
+# "ปรับโดเมน" (train-real1) = train-gray-n2 config + 672 ภาพ corrosion จริง (round1) — สมดุลสุด
+#   สนิม lab-crop ยังตรวจได้ (conf ~0.42) + ยิงบนภาพถ่ายจริงได้ 8/12
+# "รุ่นทดลอง scene" (train-real2) = + 1022 ภาพสนิม scene จริง (round2) — conf บนสนิม scene สูงขึ้น
+#   แต่ REGRESS บนสนิม lab-crop (rust_example: 0.42 -> 0.04) เพราะ fine-tune แรง + เทรนไม่จบ
 # "เล่มจบ" (train-gray-n2) = grayscale, NEU benchmark — ตัวเลขในเล่ม แต่ transfer ต่ำบนภาพถ่ายจริง
 _RUNS = BASE_DIR / "runs" / "detect"
 _STAGE2_MODELS = {
-    "ปรับโดเมน — ภาพถ่ายจริง (แนะนำ)": (_RUNS / "train-real2" / "weights" / "best.pt",
-                                          BASE_DIR / "thresholds_real2.json"),
-    "ปรับโดเมน รุ่นก่อน (round 1)":     (_RUNS / "train-real1" / "weights" / "best.pt",
+    "ปรับโดเมน — ภาพถ่ายจริง (แนะนำ)": (_RUNS / "train-real1" / "weights" / "best.pt",
                                           BASE_DIR / "thresholds_demo.json"),
+    "รุ่นทดลอง — เน้นภาพ scene (round 2)": (_RUNS / "train-real2" / "weights" / "best.pt",
+                                              BASE_DIR / "thresholds_real2.json"),
     "เล่มจบ — NEU benchmark":          (_RUNS / "train-gray-n2" / "weights" / "best.pt",
                                           BASE_DIR / "thresholds.json"),
 }
