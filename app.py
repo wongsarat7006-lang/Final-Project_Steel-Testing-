@@ -10,7 +10,13 @@ Prototype UI (Gradio): อัปโหลด / วางภาพ / ถ่าย
 ต้องมี gradio:  pip install gradio
 หมายเหตุ: การถ่ายจากกล้องในเบราว์เซอร์ต้องเปิดผ่าน https หรือ localhost (127.0.0.1)
 """
+import csv
+import json
+import re
 import sys
+import tempfile
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -19,6 +25,8 @@ from ultralytics import YOLO
 
 import pipeline as P
 import steel_gate
+
+LOG_DIR = Path(__file__).resolve().parent / "demo_logs"
 
 try:
     import gradio as gr
@@ -195,12 +203,12 @@ def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress
         traceback.print_exc()
         return (None, None,
                 _card("danger", "ประมวลผลภาพนี้ไม่สำเร็จ", str(e)),
-                [], f"`{type(e).__name__}: {e}`")
+                [], f"`{type(e).__name__}: {e}`", {})
 
 
 def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress):
     if image_rgb is None:
-        return None, None, _empty_banner(), [], ""
+        return None, None, _empty_banner(), [], "", {}
 
     image_bgr = _to_bgr(image_rgb)
 
@@ -341,13 +349,87 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progres
     else:
         status = _status_html(confirmed, tentative)
 
+    rows = _rows_data(confirmed, tentative)
+    verdict = re.sub(r"<[^>]+>", " ", status)
+    verdict = re.sub(r"\s+", " ", verdict).strip()
+    state = {
+        "model": _STATE.get("s2_key", model_key),
+        "verdict": verdict,
+        "sensitivity": sensitivity,
+        "gate_p": round(gate_p, 3) if gate_p is not None else None,
+        "stage1_metal_ratio": round(metal_ratio, 4),
+        "fallback_full_image": meta["fallback_full_image"],
+        "detections": [
+            {"region": r["tag"], "class": r["class"], "name_th": r["name_th"],
+             "confidence": round(r["conf"], 4), "risk": r["risk"], "status": "confirmed"}
+            for r in confirmed
+        ] + [
+            {"region": r["tag"], "class": r["class"], "name_th": r["name_th"],
+             "confidence": round(r["conf"], 4), "risk": r["risk"], "status": "tentative"}
+            for r in tentative
+        ],
+    }
     return (cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), stage1_img,
-            status, _rows_data(confirmed, tentative), info_md)
+            status, rows, info_md, state)
 
 
 def _globs(d):
     return [[str(p)] for p in sorted(d.glob("*"))
             if p.suffix.lower() in P.IMAGE_EXTS] if d.exists() else []
+
+
+# ---------- ดาวน์โหลดผล + feedback ----------
+def prepare_download(annotated_rgb, state):
+    """เขียนผลลัพธ์ (ภาพ annotated + JSON) เป็นไฟล์ zip ให้กดดาวน์โหลด"""
+    if annotated_rgb is None or not state:
+        return gr.update(visible=False)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp = Path(tempfile.mkdtemp(prefix="steeldemo_"))
+    jpg = tmp / f"result_{ts}.jpg"
+    cv2.imwrite(str(jpg), cv2.cvtColor(np.asarray(annotated_rgb), cv2.COLOR_RGB2BGR),
+                [cv2.IMWRITE_JPEG_QUALITY, 92])
+    js = tmp / f"result_{ts}.json"
+    js.write_text(json.dumps({"timestamp": ts, **state}, ensure_ascii=False, indent=2),
+                  encoding="utf-8")
+    zp = tmp / f"steel_result_{ts}.zip"
+    with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(jpg, jpg.name)
+        z.write(js, js.name)
+    return gr.update(value=str(zp), visible=True)
+
+
+def submit_feedback(orig_rgb, annotated_rgb, state, rating, comment):
+    """บันทึก feedback ของผู้ทดลอง -> demo_logs/feedback.csv (+ ภาพ/ผล ถ้ามี rating)"""
+    if not rating:
+        return "เลือกระดับผลตรวจก่อนกดส่ง"
+    LOG_DIR.mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    row_dir = LOG_DIR / ts
+    row_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if orig_rgb is not None:
+            cv2.imwrite(str(row_dir / "input.jpg"),
+                        cv2.cvtColor(np.asarray(orig_rgb), cv2.COLOR_RGB2BGR))
+        if annotated_rgb is not None:
+            cv2.imwrite(str(row_dir / "result.jpg"),
+                        cv2.cvtColor(np.asarray(annotated_rgb), cv2.COLOR_RGB2BGR))
+        (row_dir / "result.json").write_text(
+            json.dumps(state or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print("feedback save (image) error:", e)
+    csv_path = LOG_DIR / "feedback.csv"
+    new = not csv_path.exists()
+    with csv_path.open("a", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["timestamp", "rating", "comment", "model", "verdict",
+                        "n_detections", "folder"])
+        st = state or {}
+        w.writerow([ts, rating, (comment or "").replace("\n", " ").strip(),
+                    st.get("model", ""), st.get("verdict", ""),
+                    len(st.get("detections", [])), ts])
+    print(f"feedback: {rating} | {comment!r} -> {row_dir}")
+    return "ขอบคุณสำหรับ feedback — บันทึกแล้ว"
 
 
 _CSS = """
@@ -379,6 +461,13 @@ body,.gradio-container{background:#ffffff!important}
 .lg-metal::before{background:#fff;border:2px solid #22c55e}
 .foot{font-size:11.5px;color:#a3adba;line-height:1.6;padding:14px 2px 2px;
     border-top:1px solid #f2f5f8;margin-top:16px}
+/* กล่องขอบเขต/ข้อจำกัด */
+.limits{border:1px solid #fde8c8;background:#fffaf0;border-radius:10px;
+    padding:11px 15px;margin:2px 2px 12px;font-size:12.5px;color:#7a5b2e;line-height:1.6}
+.limits b{color:#8a5a1c}
+/* feedback */
+.fb{border:1px solid #eef1f4;border-radius:12px;padding:12px 16px;margin-top:10px;background:#fcfdfe}
+.fb-h{font-size:13px;font-weight:700;color:#334155;margin-bottom:2px}
 /* ตารางผล (gr.Dataframe) — เลื่อนแนวนอนได้เมื่อจอแคบ */
 .res-table .table-wrap, .res-table table{font-size:13px!important}
 .res-table{overflow-x:auto}
@@ -408,6 +497,15 @@ def build_ui():
             "<div class='hd-sub'>ผู้ช่วยคัดกรองสภาพผิวเหล็กจากภาพถ่าย · ตรวจตำหนิ 8 ชนิด "
             "(รอยแตกลายงา, สิ่งแปลกปลอม, ผิวลอก, ผิวเป็นหลุม, สะเก็ดรีด, รอยขีดข่วน, สนิม, รอยแตกร้าว)</div>"
             "<div class='hd-note'>prototype เพื่อการศึกษา — ไม่ใช่ระบบตรวจสอบใช้งานจริง</div>"
+            "</div>"
+        )
+        gr.HTML(
+            "<div class='limits'>"
+            "<b>ขอบเขตและข้อจำกัด (อ่านก่อนใช้):</b> "
+            "ระบบตรวจ <b>สนิม</b> ได้ดีที่สุด ส่วนตำหนิชนิดอื่นบนภาพถ่ายจริงยังพลาดได้บ่อย "
+            "(โมเดลฝึกจากภาพแล็บระยะใกล้เป็นหลัก) · "
+            "ควรถ่ายให้เห็นผิวเหล็กเต็มเฟรม ระยะใกล้–กลาง แสงสว่างพอ ไม่เบลอ · "
+            "ผลที่ได้เป็นเพียงตัวช่วยคัดกรอง — <b>ห้ามใช้เป็นเกณฑ์ตัดสินคุณภาพชิ้นงานจริง</b>"
             "</div>"
         )
 
@@ -462,17 +560,31 @@ def build_ui():
         with gr.Accordion("รายละเอียดทางเทคนิค", open=False):
             info = gr.Markdown()
 
+        # ----- ดาวน์โหลดผล + feedback -----
+        res_state = gr.State({})
+        with gr.Row():
+            dl = gr.DownloadButton("ดาวน์โหลดผล (ภาพ + JSON)", visible=False, size="sm")
+        with gr.Group(elem_classes=["fb"]):
+            gr.HTML("<div class='fb-h'>ผลตรวจนี้เป็นอย่างไร? (ช่วยพัฒนาระบบ)</div>")
+            with gr.Row():
+                fb_rate = gr.Radio(["ถูกต้อง", "ผิด / ไม่ครบ", "ภาพนี้ไม่ควรตรวจ"],
+                                   label=None, show_label=False, scale=3)
+                fb_send = gr.Button("ส่ง feedback", size="sm", scale=1)
+            fb_comment = gr.Textbox(label=None, show_label=False, lines=1,
+                                    placeholder="ความเห็นเพิ่มเติม (ถ้ามี) เช่น ตำหนิที่ระบบพลาด")
+            fb_msg = gr.Markdown()
+
         gr.HTML("<div class='foot'>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + ตรวจทั้งภาพเมื่อไม่พบ) "
                 "จากนั้น Stage 2: YOLO11n ตรวจตำหนิ 8 ชนิด · โมเดลเทรนจาก NEU-DET + Roboflow "
-                "(+ ภาพถ่ายจริงสำหรับตัว “ปรับโดเมน”)</div>")
+                "(+ ภาพถ่ายจริงสำหรับตัว “ปรับโดเมน”) · feedback/ภาพที่ส่ง เก็บในเครื่องนี้ (demo_logs/)</div>")
 
-        outputs = [out_img, out_s1, status, table, info]
+        outputs = [out_img, out_s1, status, table, info, res_state]
         ins = [inp, conf, detailed, sens, model_sel, gate_on]
-        btn.click(analyze, inputs=ins, outputs=outputs)
-        inp.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
-        sens.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
-        model_sel.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
-        gate_on.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
+        for ev in (btn.click, inp.change, sens.change, model_sel.change, gate_on.change):
+            ev(analyze, inputs=ins, outputs=outputs, show_progress="minimal").then(
+                prepare_download, inputs=[out_img, res_state], outputs=dl)
+        fb_send.click(submit_feedback,
+                      inputs=[inp, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
     return demo
 
 

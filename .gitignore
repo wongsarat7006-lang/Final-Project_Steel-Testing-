@@ -48,3 +48,6 @@ dataset_gate/
 # เอกสารอ้างอิง/ร่างของผู้จัดทำ (ไม่ commit)
 docs/ต้นแบบ/
 docs/งานของผม/
+
+# feedback/log จากผู้ทดลองใช้เดโม
+demo_logs/
