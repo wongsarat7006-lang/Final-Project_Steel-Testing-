@@ -195,9 +195,11 @@ def _rows_data(confirmed, tentative):
     return out
 
 
-def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress=gr.Progress()):
+def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multiscale=False,
+            progress=gr.Progress()):
     try:
-        return _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress)
+        return _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on,
+                        multiscale, progress)
     except Exception as e:                       # เดโมต้องไม่ค้าง — โชว์ error เป็นการ์ดแทน stack trace
         import traceback
         traceback.print_exc()
@@ -243,7 +245,7 @@ def analyze_stream(frame_rgb, model_key, sensitivity):
         return frame_rgb, f"(ประมวลผลเฟรมไม่สำเร็จ: {e})"
 
 
-def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress):
+def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multiscale, progress):
     if image_rgb is None:
         return None, None, _empty_banner(), [], "", {}
 
@@ -280,14 +282,17 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progres
         boxes = list(boxes) + [full_box]
 
     # ----- Stage 2 : ตรวจตำหนิ (คืนที่ conf ต่ำ แล้วมาแยกเองเป็น confirmed / tentative) -----
-    progress(0.55, desc="Stage 2: ตรวจตำหนิ...")
+    progress(0.55, desc=("Stage 2: ตรวจหลายสเกล..." if multiscale else "Stage 2: ตรวจตำหนิ..."))
     region_dets = []
     for x, y, w, h in boxes:
         is_full_pass = (x, y, w, h) == full_box and add_full
         k = 1.6 if is_full_pass else 1.0        # รอบ "ทั้งภาพ" ภาพถูกย่อมาก -> ต้องมั่นใจกว่าถึงจะนับ
         crop = image_bgr[y:y + h, x:x + w]
-        dets = P.run_stage2(s2, crop, _RAW_FLOOR, device, augment=bool(detailed),
-                            class_conf=None)
+        if multiscale:
+            dets = P.run_stage2_multiscale(s2, crop, _RAW_FLOOR, device, class_conf=None)
+        else:
+            dets = P.run_stage2(s2, crop, _RAW_FLOOR, device, augment=bool(detailed),
+                                class_conf=None)
         keep = []
         for d in dets:
             t = thr(d["class"]) * k
@@ -561,6 +566,9 @@ def build_ui():
                 gate_on = gr.Checkbox(
                     value=steel_gate.available(), interactive=steel_gate.available(),
                     label="Stage 0: เช็คว่าเป็นพื้นผิวเหล็กก่อน")
+            multiscale = gr.Checkbox(
+                value=False,
+                label="ตรวจหลายสเกล + ตัดไทล์ (ภาพถ่ายจริง/ภาพใหญ่ — เจอมากขึ้น แต่ช้าลง 3–6 เท่า)")
 
         cur_in = gr.State(None)   # ภาพล่าสุดที่ตรวจ (ไว้ให้ feedback)
 
@@ -644,7 +652,7 @@ def build_ui():
         outputs = [out_img, out_s1, status, table, info, res_state]
 
         def _wire(trigger, img_comp):
-            ins = [img_comp, conf, detailed, sens, model_sel, gate_on]
+            ins = [img_comp, conf, detailed, sens, model_sel, gate_on, multiscale]
             (trigger(lambda x: x, img_comp, cur_in)
              .then(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
              .then(prepare_download, inputs=[out_img, res_state], outputs=dl))
@@ -654,7 +662,7 @@ def build_ui():
         _wire(cam.change, cam)
         # เปลี่ยนตัวเลือก -> ตรวจภาพล่าสุดซ้ำ (ทั้งอัปโหลดและถ่าย)
         for c in (sens, model_sel, gate_on, conf, detailed):
-            (c.change(analyze, inputs=[cur_in, conf, detailed, sens, model_sel, gate_on],
+            (c.change(analyze, inputs=[cur_in, conf, detailed, sens, model_sel, gate_on, multiscale],
                       outputs=outputs, show_progress="minimal")
              .then(prepare_download, inputs=[out_img, res_state], outputs=dl))
 
