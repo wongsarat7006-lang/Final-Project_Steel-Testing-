@@ -25,14 +25,19 @@
 ใส่เป็น positive แล้ว `python make_gate_dataset.py && python train_gate.py` ใหม่
 → รากปัญหาเดียวกับทั้งโปรเจค: **ขาดภาพเหล็กในสภาพใช้งานจริง**
 
-### Round 2 — train-real2 (2026-09-07)
+### Round 2 — train-real2 (2026-09-07) — ผลปนเป, ยังไม่ใช้เป็น default
 Import 4 dataset ใน `downloads/` (corrosion-detection-sb1, rust-detect-1350, rust-detection-small,
 corrosion-and-cracks) = **1022 ภาพสนิม scene จริง** → `dataset_real/round2` → merge → fine-tune จาก
-train-real1 → **`train-real2`** (OOM ตาย ~epoch 81/100 แต่ val plateau แล้ว, best.pt ใช้ได้)
-- lab benchmark: mAP50 0.853 → **0.866** (กลับมาระดับเล่มจบ) ; ไม่มีคลาสไหนตก
-- real-photo rust: 6/11 → **7/11 ภาพ** + conf สูงขึ้นชัด (0.23→0.51, 0.61→0.79)
-- `thresholds_real2.json` (tune บน lab val, rust override 0.15) ; `app.py` "ปรับโดเมน" ชี้ตัวนี้แล้ว
+train-real1 → **`train-real2`** (OOM ตาย ~epoch 81/100)
+- lab benchmark: mAP50 0.866 — **แต่หลอกตา** (merged test set มี style เดียวกับ round1/round2)
+- real-photo scene rust: conf สูงขึ้น (0.23→0.51, 0.61→0.79) + localize ดีขึ้น
+- **REGRESS บนสนิม lab-crop**: `rust_example.jpg` conf 0.42 → 0.04 (catastrophic-ish forgetting)
+- → `app.py` ยังใช้ **train-real1** เป็น default ("ปรับโดเมน แนะนำ") ; train-real2 = "รุ่นทดลอง scene"
+- `thresholds_real2.json` มี (tune lab val, rust override 0.15)
 - **ยังเป็นสนิมอย่างเดียว** — 6 คลาส texture ไม่มี dataset เปิดแนว scene
+
+**ถ้าจะทำ round 2 ให้ดีจริง:** เทรนแบบ freeze backbone / lr ต่ำ / ผสม lab crop เข้าไปด้วย
+(กัน forgetting) และเทรนให้ครบ epoch ใน terminal เอง
 
 **Round 3 ถ้าจะทำต่อ:** เทรน train-real2 ให้ครบ 100 epoch (รันใน terminal คุณเอง กัน OOM):
 ```powershell
