@@ -44,3 +44,7 @@ dataset_real/
 
 # Stage 0 steel-gate: dataset ที่ประกอบจาก DTD/Imagenette (สร้างใหม่ได้ด้วย make_gate_dataset.py)
 dataset_gate/
+
+# เอกสารอ้างอิง/ร่างของผู้จัดทำ (ไม่ commit)
+docs/ต้นแบบ/
+docs/งานของผม/
