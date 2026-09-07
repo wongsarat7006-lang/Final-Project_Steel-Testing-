@@ -26,11 +26,14 @@ except ImportError:
 BASE_DIR = Path(__file__).resolve().parent
 
 # โมเดล Stage 2 ที่เลือกได้ในหน้าเดโม — key = ป้ายในหน้าจอ, value = (weights, per-class thresholds)
-# "ปรับโดเมน" (train-real1) = train-gray-n2 + 672 ภาพ corrosion จริง (RGB) — ยิงบนภาพถ่ายจริงได้จริง
+# "ปรับโดเมน" (train-real2) = train-gray-n2 config + ภาพสนิมจริง 672 (round1) + 1022 (round2, scene จริง)
+#   -> lab mAP50 0.866 ; real-photo rust recall/confidence ดีกว่า train-real1
 # "เล่มจบ" (train-gray-n2) = grayscale, NEU benchmark — ตัวเลขในเล่ม แต่ transfer ต่ำบนภาพถ่ายจริง
 _RUNS = BASE_DIR / "runs" / "detect"
 _STAGE2_MODELS = {
-    "ปรับโดเมน — ภาพถ่ายจริง (แนะนำ)": (_RUNS / "train-real1" / "weights" / "best.pt",
+    "ปรับโดเมน — ภาพถ่ายจริง (แนะนำ)": (_RUNS / "train-real2" / "weights" / "best.pt",
+                                          BASE_DIR / "thresholds_real2.json"),
+    "ปรับโดเมน รุ่นก่อน (round 1)":     (_RUNS / "train-real1" / "weights" / "best.pt",
                                           BASE_DIR / "thresholds_demo.json"),
     "เล่มจบ — NEU benchmark":          (_RUNS / "train-gray-n2" / "weights" / "best.pt",
                                           BASE_DIR / "thresholds.json"),
