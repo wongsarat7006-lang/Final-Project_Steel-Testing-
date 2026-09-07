@@ -218,19 +218,30 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progres
     n_metal = meta["n_regions"] - (1 if meta["fallback_full_image"] else 0)
     stage1_img = _stage1_view(image_bgr, mask, boxes, meta)
 
+    # ภาพ scene/มุมกว้าง: Stage 1 มักแตกเหล็กเป็นหลายชิ้นเล็ก ๆ ทำให้ Stage 2 เสียบริบท
+    # -> ถ้าแตกเป็นหลายบริเวณจริง (>=3) เพิ่ม "ตรวจทั้งภาพ" อีก 1 รอบ แล้วให้ NMS รวมผลเอง
+    #    (detection จากรอบทั้งภาพจะถูกกรองด้วย threshold ที่เข้มกว่า เพราะภาพถูกย่อมาก)
+    H, W = image_bgr.shape[:2]
+    full_box = (0, 0, W, H)
+    add_full = (not meta["fallback_full_image"] and len(boxes) >= 3 and full_box not in boxes)
+    if add_full:
+        boxes = list(boxes) + [full_box]
+
     # ----- Stage 2 : ตรวจตำหนิ (คืนที่ conf ต่ำ แล้วมาแยกเองเป็น confirmed / tentative) -----
     progress(0.55, desc="Stage 2: ตรวจตำหนิ...")
     region_dets = []
     for x, y, w, h in boxes:
+        is_full_pass = (x, y, w, h) == full_box and add_full
+        k = 1.6 if is_full_pass else 1.0        # รอบ "ทั้งภาพ" ภาพถูกย่อมาก -> ต้องมั่นใจกว่าถึงจะนับ
         crop = image_bgr[y:y + h, x:x + w]
         dets = P.run_stage2(s2, crop, _RAW_FLOOR, device, augment=bool(detailed),
                             class_conf=None)
         keep = []
         for d in dets:
-            t = thr(d["class"])
+            t = thr(d["class"]) * k
             if d["confidence"] >= t:
                 d["_status"] = "ok"
-            elif d["confidence"] >= _TENTATIVE_FLOOR:
+            elif d["confidence"] >= _TENTATIVE_FLOOR * k:
                 d["_status"] = "maybe"
             else:
                 continue
@@ -255,11 +266,9 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progres
     confirmed, tentative = [], []
     for i, (x, y, w, h) in enumerate(boxes):
         dets = [d for d in region_dets[i] if id(d) in kept_ids]
-        is_full = meta["fallback_full_image"] and i == len(boxes) - 1
+        is_full = (x, y, w, h) == full_box
         tag = "ทั้งภาพ" if is_full else f"#{i + 1}"
-        # วาดกรอบบริเวณเหล็กเฉพาะตอนมีหลายบริเวณจริง — ภาพทั่วไป/fallback ไม่ต้องรก
-        if not is_full and len(boxes) > 1:
-            cv2.rectangle(annotated, (x, y), (x + w, y + h), C_REGION, lw_thin)
+        # กรอบบริเวณเหล็ก (เขียว) แสดงเฉพาะในภาพ Stage 1 เท่านั้น — ภาพผลลัพธ์ให้เห็นแค่กรอบตำหนิ
 
         ok = [d for d in dets if d["_status"] == "ok"]
         mb = [d for d in dets if d["_status"] == "maybe"]
@@ -276,9 +285,6 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progres
             annotated = P.draw_thai_text(
                 annotated, f"อาจเป็น {top['name_th']} ({mb[0]['confidence']:.0%})?",
                 (lx, ly), color_bgr=C_MAYBE, font_size=fpx)
-        elif not any(dd["_status"] == "ok" for reg in region_dets for dd in reg):
-            annotated = P.draw_thai_text(annotated, f"เหล็ก {tag} ปกติ",
-                                         (lx, ly), color_bgr=(0, 150, 0), font_size=fpx)
 
         for d in dets:
             gx1, gy1, gx2, gy2 = (int(v) for v in d["bbox_xyxy_global"])
