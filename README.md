@@ -396,10 +396,25 @@ val mAP50 = 0.854 ≈ test 0.853 → ไม่ overfit
 python evaluate_real.py           # pipeline (Stage 1 + Stage 2) vs baseline (YOLO ภาพเต็ม)
 ```
 
-| | micro-P | micro-R | micro-F1 | macro-F1 | sec/img |
-|---|---|---|---|---|---|
-| Pipeline (2-stage) | _?_ | _?_ | _?_ | _?_ | _?_ |
-| Baseline (ไม่มี Stage 1) | _?_ | _?_ | _?_ | _?_ | _?_ |
+วัดบน `real_test/` **18 ภาพถ่ายจริงระดับ scene** (ดึงจากเน็ต — ข้อจำกัดของชุด ดู `real_test/SOURCES.md`:
+เอียงไป rust, ไม่มี inclusion/rolled-in_scale/crazing) — image-level P/R/F1:
+
+| โมเดล Stage 2 | | micro-P | micro-R | micro-F1 | macro-F1 | sec/img |
+|---|---|---|---|---|---|---|
+| `train-gray-n2` (เล่มจบ) | Pipeline (2-stage) | 0.143 | 0.043 | 0.067 | 0.057 | 0.56 |
+| `train-gray-n2` (เล่มจบ) | Baseline (ไม่มี Stage 1) | 0.333 | 0.043 | 0.077 | 0.067 | 0.04 |
+| `train-real1` (future work) | Pipeline (2-stage) | 0.692 | 0.391 | 0.500 | 0.219 | 0.35 |
+| `train-real1` (future work) | Baseline (ไม่มี Stage 1) | 0.750 | 0.391 | 0.514 | 0.226 | 0.03 |
+
+**อ่านผล:**
+- โมเดลเล่มจบ (`train-gray-n2`, grayscale + NEU benchmark) **แทบไม่ยิงบนภาพถ่ายจริงเลย** (micro-R 0.043,
+  rust 0/12 เพราะ conf 0.92 จาก val แล็บกรองทิ้งหมด) — สอดคล้องกับ cross-dataset GC10-DET ที่ transfer ≈ 0
+  → เป็นหลักฐาน **domain gap** ตรง ๆ ไม่ใช่จุดบกพร่องของสถาปัตยกรรม
+- ราง future work (`train-real1` = config เดิม + 672 ภาพ corrosion จริง, RGB): rust recall **0/12 → 8/12**,
+  micro-F1 0.067 → 0.50 — ยืนยันว่า **ต้องมีภาพในโดเมนเข้าชุดเทรน** ถึงจะใช้งานบนภาพจริงได้ (ดู `DATA_COLLECTION.md`)
+- **Stage 1 ไม่ช่วย** แม้บนภาพ scene จริง: `stage1_metal_found_rate` 0.56 (ดีกว่าบน crop แล็บ 0.35)
+  แต่ pipeline micro-P **ต่ำกว่า** baseline ทั้งสองโมเดล (fallback + กรอบ metal เพี้ยนเพิ่ม FP)
+  → conclusion เป็น **negative ablation** ตามที่ตั้งไว้ใน `thesis_notes.md` ข้อ 2
 
 ### Stage 1 (DMS46) — metric เชิงตัวเลข (`evaluate_stage1.py`)
 
@@ -473,11 +488,20 @@ python evaluate.py --mode stage2   # วัดผลซ้ำ
    segmentation ระดับฉาก ต้องมีบริบทพื้นหลัง. บน close-up texture patch (merged_dataset test
    416 ภาพ) `evaluate_stage1.py` ได้ fallback 78%, gt_area_kept 16% →
    ตัวเลข mAP บน `merged_dataset` เป็น Stage 2 ล้วน ไม่สะท้อนทั้งระบบ
-4. **ค่าของ Stage 1 ยังพิสูจน์ไม่ได้เชิงบวก** — `evaluate_stage1.py` แสดงว่ามันไม่ทำงาน
-   บนชุด benchmark; ต้องมี `real_test/` (ภาพถ่ายจริง) เพื่อวัดว่าช่วยตัด false positive
-   จากพื้นหลังที่ไม่ใช่เหล็กได้จริงหรือไม่
-5. **crazing ยังเป็นคลาสที่ยากที่สุด** แม้หลังปรับปรุง — เป็นข้อจำกัดที่พบใน literature ของ NEU-DET เช่นกัน
-6. รันทดลอง seed เดียว (seed=0) ยังไม่มีช่วงความเชื่อมั่น
+4. **Stage 1 (DMS46) ไม่ช่วยเชิงบวก — สรุปเป็น negative ablation** — บน `merged_dataset` test
+   `evaluate_stage1.py` = fallback 78%; บน `real_test/` 18 ภาพ scene จริง Stage 1 ทำงานบ่อยขึ้น
+   (metal_found_rate 0.56) แต่ pipeline micro-P **ต่ำกว่า** baseline ทั้งสองโมเดล
+   → material segmentation ระดับฉากไม่ใช่ front-end ที่เหมาะกับโดเมนนี้; classifier เหล็ก/ไม่เหล็ก
+   ตัวเล็กที่ fine-tune เองน่าจะเหมาะกว่า (future work)
+5. **crack เป็นคลาสที่อ่อนที่สุด** — test mAP50 **0.687 ± 0.011**, recall **0.61** (n=4).
+   สาเหตุ: (ก) มาจาก `crack_dataset` แหล่งเดียว annotate เป็น polygon → bbox หลวม
+   (ข) เป็นตำหนิที่บางที่สุด grayscale ยิ่งลด contrast ของขอบรอย
+   (ค) ภาพ crack ในโดเมนจริงมีสเกล/พื้นผิวหลากหลายกว่าคลาส NEU มาก
+   สำหรับ prototype คัดกรอง recall 0.61 ยังใช้ได้ (คนตรวจซ้ำอยู่แล้ว) แต่เป็นจุดที่ต้องเพิ่มข้อมูลก่อนใช้จริง
+6. **crazing ยังเป็นคลาส texture ที่ยากสุด** (std ข้าม seed ~0.05) — สอดคล้องกับ literature ของ NEU-DET
+7. **domain gap รุนแรงบนภาพถ่ายจริง** — โมเดลเล่มจบ (`train-gray-n2`) บน `real_test/` micro-R 0.043,
+   rust 0/12 — grayscale + benchmark แล็บทำให้ transfer ≈ 0 (ตรงกับ cross-dataset GC10)
+   ต้องมีภาพในโดเมนเข้าชุดเทรน (ราง active-learning ใน `DATA_COLLECTION.md`) ถึงจะใช้งานภาพจริงได้
 
 ---
 

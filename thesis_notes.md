@@ -57,6 +57,13 @@
 | เสมอตัวเรื่อง F1 แต่ +~200 ms/ภาพ | ตัดออก — รายงานเป็น **negative ablation** (เป็น contribution ที่ให้เหตุผลกับระบบที่ง่ายกว่า) |
 | ช่วยเฉพาะภาพพื้นหลังรก | เก็บแบบ **soft-gate + fallback** (implement ไว้แล้วใน `pipeline.py`: `metal_ratio < 0.05` → ตรวจทั้งภาพ) |
 
+**→ ผลจริง (2026-09-07, `real_test/` 18 ภาพ): แถวที่ 2 — negative ablation.**
+Stage 1 ทำงานบ่อยขึ้นบนภาพ scene จริง (metal_found_rate 0.35 บน crop แล็บ → **0.56** บน real_test)
+แต่ pipeline (มี Stage 1) micro-P **ต่ำกว่า** baseline (ไม่มี Stage 1) ทั้ง train-gray-n2 (0.143 vs 0.333)
+และ train-real1 (0.692 vs 0.750) — กรอบ metal ที่เพี้ยน + fallback ทำให้เกิด FP เพิ่มโดยไม่ได้ recall กลับมา
+เก็บ `pipeline.py` (soft-gate + fallback + cross-region NMS) ไว้เป็นโค้ด แต่บทสรุปเล่ม = **"2-stage ไม่คุ้มสำหรับ use case นี้;
+material segmentation ระดับฉากไม่เหมาะเป็น front-end — future work คือ classifier เหล็ก/ไม่เหล็กตัวเล็ก fine-tune เอง"**
+
 ### หลักฐานที่มีอยู่แล้ว (`evaluate_stage1.py`, test split 416 ภาพ)
 - metal_found_rate 0.35, **fallback_rate 0.78**, box_coverage 0.10, gt_area_kept 0.16, latency 208  ms/ภาพ (GPU)
 - บนภาพ scene จริง (`test_images/`) DMS46 เจอเหล็ก 24–82%
@@ -106,8 +113,9 @@
 | `evaluate_stage1.py` | ✅ รันเต็ม 416 ภาพ → `results/stage1_dms46_test.json` |
 | cross-region NMS ใน `pipeline.py` | ✅ |
 | Ablation แยกผล label+gray vs 11n vs 11s | ✅ split สะอาด: `train-gray-n2` **0.867 ± 0.010** > `train-gray-s2` 0.840 → **yolo11n ดีกว่า** yolo11s; เกนหลักมาจาก label+gray |
-| `real_test/` | ⏳ ต้องเก็บภาพเอง (ดู `NEXT_STEPS.md` ข้อ 3) |
-| Ablation Stage 1 (`evaluate_real.py`) | ⏳ รอ `real_test/` |
+| `real_test/` | ⚠️ มี 18 ภาพ (net-sourced, เอียง rust, ไม่มี inclusion/rolled-in/crazing, ยังไม่มี URL) — ใช้ได้ระดับ "แสดง domain gap" ไม่ใช่ validation เต็ม |
+| Ablation Stage 1 (`evaluate_real.py`) | ✅ 2026-09-07 — **negative ablation**: บน real_test Stage 1 metal_found_rate 0.56 แต่ pipeline micro-P < baseline ทั้ง train-gray-n2 และ train-real1 → เก็บโค้ดไว้ รายงานว่าไม่คุ้ม (บทสรุป = แถวที่ 2 ในตารางข้อ 2) |
+| Real-photo domain gap | ✅ train-gray-n2 บน real_test: micro-R 0.043, rust 0/12 (conf 0.92 แล็บกรองหมด) — ตรงกับ GC10 transfer ≈ 0. ราง future work `train-real1` (+672 ภาพ corrosion): rust recall 0/12 → 8/12, micro-F1 0.067 → 0.50 |
 | multi-seed (n=4), leakage check, เทียบเปเปอร์ NEU-DET | ✅ `results/stage2_multiseed.json`, `check_leakage.py`, `literature_comparison.md` |
 | cross-dataset test (GC10-DET แทน real_test) | ✅ `evaluate_cross_dataset.py`, `cross_dataset_eval.md` — transfer ~0 |
 | Error Analysis | ✅ `docs/error_analysis.docx` (EA-1..5) |
