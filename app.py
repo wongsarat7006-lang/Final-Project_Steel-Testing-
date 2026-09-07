@@ -206,6 +206,43 @@ def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress
                 [], f"`{type(e).__name__}: {e}`", {})
 
 
+_C_OK, _C_MAYBE = (68, 68, 239), (11, 158, 245)   # BGR ~ #ef4444 / #f59e0b
+
+
+def analyze_stream(frame_rgb, model_key, sensitivity):
+    """โหมดเรียลไทม์ (ทดลอง): รัน Stage 2 บนเฟรมเต็ม ไม่ผ่าน Stage 1 — เร็วพอสำหรับดูสด
+    คืน (ภาพพร้อมกรอบ, ข้อความสรุปสั้น)"""
+    if frame_rgb is None:
+        return None, ""
+    try:
+        bgr = _to_bgr(frame_rgb)
+        _, s2, device = _ensure_models(model_key)
+        scale = _SENS.get(sensitivity, 1.0)
+        cc = _STATE["class_conf"] or {}
+        dets = P.run_stage2(s2, bgr, _RAW_FLOOR, device, augment=False, class_conf=None)
+        S = max(bgr.shape[:2])
+        lw = max(2, round(S / 380))
+        fpx = int(min(48, max(16, S / 40)))
+        found = {}
+        for d in dets:
+            t = max(_RAW_FLOOR, cc.get(d["class"], 0.4) * scale)
+            if d["confidence"] < t:
+                continue
+            x1, y1, x2, y2 = (int(v) for v in d["bbox_xyxy_crop"])
+            cv2.rectangle(bgr, (x1, y1), (x2, y2), (255, 255, 255), lw + 2)
+            cv2.rectangle(bgr, (x1, y1), (x2, y2), _C_OK, lw)
+            di = P.DEFECT_INFO[d["class"]]
+            ly = y1 - fpx - 6 if y1 - fpx - 6 >= 2 else y1 + 4
+            bgr = P.draw_thai_text(bgr, f"{di['name_th']} {d['confidence']:.0%}",
+                                   (max(x1, 3), ly), color_bgr=_C_OK, font_size=fpx)
+            found[di["name_th"]] = max(found.get(di["name_th"], 0), d["confidence"])
+        txt = ("พบ: " + ", ".join(f"{k} {v:.0%}" for k, v in
+               sorted(found.items(), key=lambda kv: -kv[1]))) if found else "ยังไม่พบตำหนิ"
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), txt
+    except Exception as e:
+        return frame_rgb, f"(ประมวลผลเฟรมไม่สำเร็จ: {e})"
+
+
 def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress):
     if image_rgb is None:
         return None, None, _empty_banner(), [], "", {}
@@ -509,36 +546,62 @@ def build_ui():
             "</div>"
         )
 
-        with gr.Row(equal_height=False):
-            # ----- ซ้าย: อินพุต -----
-            with gr.Column(scale=5, min_width=300):
-                inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ",
-                               height=280, sources=["upload", "webcam", "clipboard"])
-                gr.HTML("<div class='hint'>อัปโหลด · วางภาพ · หรือถ่ายจากกล้อง "
-                        "(กดไอคอนกล้องในกรอบ แล้วถ่าย) — ระบบตรวจให้อัตโนมัติ</div>")
+        # ===== ตัวเลือกขั้นสูง (ใช้ร่วมโหมด อัปโหลด / ถ่ายภาพ) =====
+        with gr.Accordion("ตัวเลือกขั้นสูง", open=False):
+            with gr.Row():
+                model_sel = gr.Dropdown(
+                    model_choices, value=model_choices[0] if model_choices else None,
+                    label="โมเดล Stage 2", scale=2)
+                sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
+                                label="โหมดความไว", scale=2)
+            with gr.Row():
+                conf = gr.Slider(0.1, 0.9, value=0.4, step=0.05,
+                                 label="Confidence ขั้นต่ำ (Stage 2)")
+                detailed = gr.Checkbox(value=False, label="ตรวจละเอียด (TTA — ช้าลง 2–3 เท่า)")
+                gate_on = gr.Checkbox(
+                    value=steel_gate.available(), interactive=steel_gate.available(),
+                    label="Stage 0: เช็คว่าเป็นพื้นผิวเหล็กก่อน")
+
+        cur_in = gr.State(None)   # ภาพล่าสุดที่ตรวจ (ไว้ให้ feedback)
+
+        # ===== 3 โหมด =====
+        with gr.Tabs():
+            with gr.Tab("อัปโหลดภาพ"):
+                inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ", height=300,
+                               sources=["upload", "clipboard"])
+                gr.HTML("<div class='hint'>ลากไฟล์มาวาง · กดเลือกไฟล์ · หรือวาง (Ctrl+V) "
+                        "— ระบบตรวจให้อัตโนมัติ</div>")
                 btn = gr.Button("ตรวจสอบ", variant="primary", size="lg")
-                with gr.Accordion("ตัวเลือกขั้นสูง", open=False):
-                    model_sel = gr.Radio(
-                        model_choices, value=model_choices[0] if model_choices else None,
-                        label="โมเดล Stage 2",
-                        info="ปรับโดเมน = เทรนเพิ่มด้วยภาพถ่ายจริง · เล่มจบ = grayscale, NEU benchmark")
-                    sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
-                                    label="โหมดความไว",
-                                    info="ภาพที่โมเดลไม่คุ้น เพิ่มเป็น ไว / ไวมาก (เตือนมากขึ้น พลาดน้อยลง)")
-                    conf = gr.Slider(0.1, 0.9, value=0.4, step=0.05,
-                                     label="Confidence ขั้นต่ำ (Stage 2)")
-                    detailed = gr.Checkbox(value=False, label="ตรวจละเอียด (TTA — ช้าลง 2–3 เท่า)")
-                    gate_on = gr.Checkbox(
-                        value=steel_gate.available(), interactive=steel_gate.available(),
-                        label="Stage 0: เช็คว่าเป็นพื้นผิวเหล็กก่อน",
-                        info=("" if steel_gate.available() else "ยังไม่มีโมเดล gate — รัน train_gate.py"))
                 if lab_samples or real_samples:
                     gr.Examples(examples=(lab_samples + real_samples), inputs=inp,
                                 label="ภาพตัวอย่าง (กดเพื่อตรวจ)", examples_per_page=16)
 
-            # ----- ขวา: ผลสรุป -----
+            with gr.Tab("ถ่ายภาพ"):
+                cam = gr.Image(type="numpy", label="กล้อง", height=340, sources=["webcam"])
+                gr.HTML("<div class='hint'>อนุญาตให้เบราว์เซอร์ใช้กล้อง → เล็งไปที่ผิวเหล็ก → "
+                        "<b>กดปุ่มถ่าย (วงกลม) ที่มุมล่างของภาพกล้อง</b> → ระบบตรวจให้อัตโนมัติ "
+                        "· กดถ่ายใหม่ได้เรื่อย ๆ</div>")
+
+            with gr.Tab("เรียลไทม์ (ทดลอง)"):
+                gr.HTML("<div class='hint'>ทดลอง — รัน YOLO บนเฟรมกล้องต่อเนื่อง (ข้าม Stage 1) "
+                        "ความแม่นเท่าโหมดภาพนิ่ง · เฟรมเบลอ/สั่นอาจเตือนผิด · ~3–8 เฟรม/วินาที</div>")
+                with gr.Row():
+                    rt_model = gr.Dropdown(
+                        model_choices, value=model_choices[0] if model_choices else None,
+                        label="โมเดล", scale=2)
+                    rt_sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="ไว",
+                                       label="ความไว", scale=2)
+                rt_in = gr.Image(type="numpy", label="กล้อง (สด)", height=280,
+                                 sources=["webcam"], streaming=True)
+                rt_out = gr.Image(type="numpy", label="ผลเรียลไทม์", interactive=False,
+                                  elem_classes=["result-img"])
+                rt_txt = gr.Markdown()
+
+        # ===== ผลตรวจ (โหมด อัปโหลด + ถ่ายภาพ) =====
+        with gr.Row(equal_height=False):
             with gr.Column(scale=5, min_width=300):
                 status = gr.HTML(_empty_banner())
+            with gr.Column(scale=5, min_width=300):
                 table = gr.Dataframe(headers=TABLE_HEADERS, datatype=["str"] * 5,
                                      row_count=(1, "dynamic"),
                                      interactive=False, wrap=True,
@@ -579,12 +642,29 @@ def build_ui():
                 "(+ ภาพถ่ายจริงสำหรับตัว “ปรับโดเมน”) · feedback/ภาพที่ส่ง เก็บในเครื่องนี้ (demo_logs/)</div>")
 
         outputs = [out_img, out_s1, status, table, info, res_state]
-        ins = [inp, conf, detailed, sens, model_sel, gate_on]
-        for ev in (btn.click, inp.change, sens.change, model_sel.change, gate_on.change):
-            ev(analyze, inputs=ins, outputs=outputs, show_progress="minimal").then(
-                prepare_download, inputs=[out_img, res_state], outputs=dl)
+
+        def _wire(trigger, img_comp):
+            ins = [img_comp, conf, detailed, sens, model_sel, gate_on]
+            (trigger(lambda x: x, img_comp, cur_in)
+             .then(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
+             .then(prepare_download, inputs=[out_img, res_state], outputs=dl))
+
+        _wire(btn.click, inp)
+        _wire(inp.change, inp)
+        _wire(cam.change, cam)
+        # เปลี่ยนตัวเลือก -> ตรวจภาพล่าสุดซ้ำ (ทั้งอัปโหลดและถ่าย)
+        for c in (sens, model_sel, gate_on, conf, detailed):
+            (c.change(analyze, inputs=[cur_in, conf, detailed, sens, model_sel, gate_on],
+                      outputs=outputs, show_progress="minimal")
+             .then(prepare_download, inputs=[out_img, res_state], outputs=dl))
+
         fb_send.click(submit_feedback,
-                      inputs=[inp, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
+                      inputs=[cur_in, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
+
+        # โหมดเรียลไทม์ (ทดลอง) — สตรีมเฟรมกล้อง
+        rt_in.stream(analyze_stream, inputs=[rt_in, rt_model, rt_sens],
+                     outputs=[rt_out, rt_txt], show_progress="hidden",
+                     stream_every=0.4, concurrency_limit=1)
     return demo
 
 
