@@ -49,11 +49,11 @@ _STATE = {"s1": None, "device": None, "class_conf": None, "s2_cache": {}, "cc_ca
 # ระดับความเสี่ยง -> ลำดับการแสดงผล (สูงก่อน) + สีชิป (โทนอ่อน อ่านสบายตา)
 _RISK_ORDER = {"สูง": 0, "ปานกลาง-สูง": 1, "ปานกลาง": 2, "ต่ำ-ปานกลาง": 3, "ต่ำ": 4}
 _RISK_COLOR = {
-    "สูง": ("#f7e9e7", "#9c3a2f"),
-    "ปานกลาง-สูง": ("#f7efe4", "#8a5a1c"),
-    "ปานกลาง": ("#f5f1e3", "#77661f"),
-    "ต่ำ-ปานกลาง": ("#eaeef5", "#3f567f"),
-    "ต่ำ": ("#eef0f3", "#586070"),
+    "สูง": ("#fef2f2", "#dc2626"),
+    "ปานกลาง-สูง": ("#fff7ed", "#ea580c"),
+    "ปานกลาง": ("#fefce8", "#a16207"),
+    "ต่ำ-ปานกลาง": ("#eff6ff", "#2563eb"),
+    "ต่ำ": ("#f1f5f9", "#475569"),
 }
 _HIGH_RISK = ("สูง", "ปานกลาง-สูง")
 
@@ -129,8 +129,8 @@ def _stage1_view(image_bgr, mask, boxes, meta):
 # ---------- HTML rendering ----------
 # state -> สีเส้นขอบซ้ายของการ์ดสรุปผล (โทนเดียวกับ _RISK_COLOR — เรียบ ไม่มีพื้นสีจัด)
 _STATE_ACCENT = {
-    "danger": "#c0503f", "warn": "#b07d3a", "maybe": "#8b93a1",
-    "ok": "#4b8f6d", "neutral": "#c2c9d2",
+    "danger": "#ef4444", "warn": "#f59e0b", "maybe": "#94a3b8",
+    "ok": "#22c55e", "neutral": "#cbd5e1",
 }
 
 
@@ -252,7 +252,7 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
     lw = max(3, round(S / 400))                 # กรอบตำหนิที่ยืนยัน
     lw_thin = max(2, lw - 2)                    # กรอบ "อาจมี"
     fpx = int(min(72, max(22, S / 34)))         # ฟอนต์ป้ายกำกับ
-    C_OK, C_MAYBE, C_REGION = (36, 28, 214), (0, 140, 235), (70, 170, 70)
+    C_OK, C_MAYBE, C_REGION = (68, 68, 239), (11, 158, 245), (94, 197, 34)  # BGR ~ #ef4444 / #f59e0b / #22c55e
 
     confirmed, tentative = [], []
     for i, (x, y, w, h) in enumerate(boxes):
@@ -321,44 +321,47 @@ def _globs(d):
 
 
 _CSS = """
+:root{color-scheme:light}
 footer{display:none!important}
+body,.gradio-container{background:#ffffff!important}
 .gradio-container{max-width:1200px!important;margin:0 auto!important}
-/* ภาพผลตรวจ — ให้ใหญ่ เห็นตำหนิชัด */
-.result-img{border:1px solid #e0e3e8;border-radius:10px;background:#f4f6f8}
+/* ภาพผลตรวจ — ใหญ่ สว่าง เห็นตำหนิชัด */
+.result-img{border:1px solid #eef1f4;border-radius:12px;background:#fbfcfd}
 .result-img img{object-fit:contain!important}
-.hd{padding:6px 2px 14px}
-.hd-title{font-size:22px;font-weight:650;color:#1f2530;letter-spacing:.2px}
-.hd-sub{font-size:13.5px;color:#5b6470;margin-top:5px;line-height:1.5}
-.hd-note{font-size:12px;color:#98a0ab;margin-top:3px}
-.hint{font-size:12px;color:#8a929e;margin:-2px 0 8px}
+.hd{padding:8px 2px 16px}
+.hd-title{font-size:23px;font-weight:700;color:#0f172a;letter-spacing:.2px}
+.hd-sub{font-size:13.5px;color:#64748b;margin-top:6px;line-height:1.55}
+.hd-note{font-size:11.5px;color:#aeb7c2;margin-top:4px}
+.hint{font-size:12px;color:#94a3b8;margin:-2px 0 8px}
 /* การ์ดสรุปผล */
-.rc{border:1px solid #e4e7ec;border-left:4px solid #c2c9d2;border-radius:10px;
-    padding:13px 16px;background:#fff}
-.rc-kicker{font-size:10.5px;letter-spacing:.1em;color:#9aa2ad;text-transform:uppercase}
-.rc-title{font-size:17px;font-weight:600;color:#232a35;line-height:1.35;margin-top:2px}
-.rc-sub{font-size:13px;color:#606a78;margin-top:5px;line-height:1.5}
+.rc{border:1px solid #eef1f4;border-left:5px solid #cbd5e1;border-radius:12px;
+    padding:14px 18px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+.rc-kicker{font-size:10.5px;letter-spacing:.12em;color:#aeb7c2;text-transform:uppercase}
+.rc-title{font-size:17.5px;font-weight:700;color:#0f172a;line-height:1.35;margin-top:3px}
+.rc-sub{font-size:13px;color:#5b6675;margin-top:6px;line-height:1.55}
 /* legend ใต้ภาพผล */
-.legend{display:flex;flex-wrap:wrap;gap:14px;margin:8px 2px 2px}
-.lg{font-size:11.5px;color:#6b7280;display:flex;align-items:center}
-.lg::before{content:"";width:11px;height:11px;border-radius:3px;margin-right:6px;
-    border:1px solid rgba(0,0,0,.15)}
-.lg-def::before{background:#d6362b}
-.lg-may::before{background:#f08a2c}
-.lg-metal::before{background:#fff;border:2px solid #46a046}
+.legend{display:flex;flex-wrap:wrap;gap:16px;margin:10px 2px 2px}
+.lg{font-size:11.5px;color:#64748b;display:flex;align-items:center}
+.lg::before{content:"";width:12px;height:12px;border-radius:3px;margin-right:6px}
+.lg-def::before{background:#ef4444}
+.lg-may::before{background:#f59e0b}
+.lg-metal::before{background:#fff;border:2px solid #22c55e}
 /* ตารางผล */
-table.rt{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
-table.rt th{text-align:left;font-weight:600;color:#6b7280;font-size:11.5px;
-    letter-spacing:.04em;padding:7px 10px;border-bottom:1px solid #e4e7ec}
-table.rt td{padding:9px 10px;border-bottom:1px solid #eef0f3;color:#2b323d;vertical-align:middle}
+table.rt{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:10px;
+    background:#fff;border:1px solid #eef1f4;border-radius:12px;overflow:hidden}
+table.rt th{text-align:left;font-weight:600;color:#8a94a3;font-size:11px;
+    letter-spacing:.05em;text-transform:uppercase;padding:9px 12px;background:#f8fafc;
+    border-bottom:1px solid #eef1f4}
+table.rt td{padding:11px 12px;border-bottom:1px solid #f2f5f8;color:#1f2937;vertical-align:middle}
 table.rt tr:last-child td{border-bottom:none}
-.rt-name{font-weight:600}
-.rt-cls{color:#9aa2ad;font-size:11.5px;margin-left:7px}
-.rt-chip{padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
-.rt-tag{color:#9aa2ad;font-size:11px}
-tr.rt-muted td{color:#8a929e}
-tr.rt-muted .rt-name{font-weight:500;color:#6b7280}
-.foot{font-size:11.5px;color:#98a0ab;line-height:1.6;padding:14px 2px 2px;
-    border-top:1px solid #eef0f3;margin-top:16px}
+.rt-name{font-weight:600;color:#0f172a}
+.rt-cls{color:#aeb7c2;font-size:11.5px;margin-left:7px}
+.rt-chip{padding:2px 10px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.rt-tag{color:#aeb7c2;font-size:11px}
+tr.rt-muted td{color:#94a3b8;background:#fcfdfe}
+tr.rt-muted .rt-name{font-weight:500;color:#64748b}
+.foot{font-size:11.5px;color:#a3adba;line-height:1.65;padding:16px 2px 2px;
+    border-top:1px solid #f2f5f8;margin-top:18px}
 """
 
 
@@ -368,7 +371,7 @@ def build_ui():
     model_choices = list(_available_models())
 
     with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก",
-                   theme=gr.themes.Soft(primary_hue="slate", neutral_hue="slate"),
+                   theme=gr.themes.Soft(primary_hue="blue", neutral_hue="gray"),
                    css=_CSS) as demo:
         gr.HTML(
             "<div class='hd'>"
