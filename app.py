@@ -350,44 +350,45 @@ _CSS = """
 :root{color-scheme:light}
 footer{display:none!important}
 body,.gradio-container{background:#ffffff!important}
-.gradio-container{max-width:1200px!important;margin:0 auto!important}
-/* ภาพผลตรวจ — ใหญ่ สว่าง เห็นตำหนิชัด */
-.result-img{border:1px solid #eef1f4;border-radius:12px;background:#fbfcfd}
-.result-img img{object-fit:contain!important}
-.hd{padding:8px 2px 16px}
-.hd-title{font-size:23px;font-weight:700;color:#0f172a;letter-spacing:.2px}
-.hd-sub{font-size:13.5px;color:#64748b;margin-top:6px;line-height:1.55}
+.gradio-container{max-width:1180px!important;margin:0 auto!important;padding:10px 12px 28px!important}
+/* ภาพผลตรวจ — ปรับตามอัตราส่วนภาพเอง จำกัดความสูงไม่ให้ล้นจอ */
+.result-img{border:1px solid #eef1f4;border-radius:12px;background:#fbfcfd;min-height:220px}
+.result-img img{object-fit:contain!important;max-height:72vh!important}
+/* หัวเรื่อง */
+.hd{padding:6px 2px 14px}
+.hd-title{font-size:22px;font-weight:700;color:#0f172a;letter-spacing:.2px;line-height:1.25}
+.hd-sub{font-size:13px;color:#64748b;margin-top:5px;line-height:1.5}
 .hd-note{font-size:11.5px;color:#aeb7c2;margin-top:4px}
 .hint{font-size:12px;color:#94a3b8;margin:-2px 0 8px}
 /* การ์ดสรุปผล */
 .rc{border:1px solid #eef1f4;border-left:5px solid #cbd5e1;border-radius:12px;
-    padding:14px 18px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+    padding:13px 16px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.05)}
 .rc-kicker{font-size:10.5px;letter-spacing:.12em;color:#aeb7c2;text-transform:uppercase}
-.rc-title{font-size:17.5px;font-weight:700;color:#0f172a;line-height:1.35;margin-top:3px}
+.rc-title{font-size:17px;font-weight:700;color:#0f172a;line-height:1.35;margin-top:3px}
 .rc-sub{font-size:13px;color:#5b6675;margin-top:6px;line-height:1.55}
 /* legend ใต้ภาพผล */
-.legend{display:flex;flex-wrap:wrap;gap:16px;margin:10px 2px 2px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:9px 2px 2px}
 .lg{font-size:11.5px;color:#64748b;display:flex;align-items:center}
-.lg::before{content:"";width:12px;height:12px;border-radius:3px;margin-right:6px}
+.lg::before{content:"";width:12px;height:12px;border-radius:3px;margin-right:6px;flex:none}
 .lg-def::before{background:#ef4444}
 .lg-may::before{background:#f59e0b}
 .lg-metal::before{background:#fff;border:2px solid #22c55e}
-/* ตารางผล */
-table.rt{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:10px;
-    background:#fff;border:1px solid #eef1f4;border-radius:12px;overflow:hidden}
-table.rt th{text-align:left;font-weight:600;color:#8a94a3;font-size:11px;
-    letter-spacing:.05em;text-transform:uppercase;padding:9px 12px;background:#f8fafc;
-    border-bottom:1px solid #eef1f4}
-table.rt td{padding:11px 12px;border-bottom:1px solid #f2f5f8;color:#1f2937;vertical-align:middle}
-table.rt tr:last-child td{border-bottom:none}
-.rt-name{font-weight:600;color:#0f172a}
-.rt-cls{color:#aeb7c2;font-size:11.5px;margin-left:7px}
-.rt-chip{padding:2px 10px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
-.rt-tag{color:#aeb7c2;font-size:11px}
-tr.rt-muted td{color:#94a3b8;background:#fcfdfe}
-tr.rt-muted .rt-name{font-weight:500;color:#64748b}
-.foot{font-size:11.5px;color:#a3adba;line-height:1.65;padding:16px 2px 2px;
-    border-top:1px solid #f2f5f8;margin-top:18px}
+.foot{font-size:11.5px;color:#a3adba;line-height:1.6;padding:14px 2px 2px;
+    border-top:1px solid #f2f5f8;margin-top:16px}
+/* ตารางผล (gr.Dataframe) — เลื่อนแนวนอนได้เมื่อจอแคบ */
+.res-table .table-wrap, .res-table table{font-size:13px!important}
+.res-table{overflow-x:auto}
+/* ===== จอมือถือ / จอแคบ ===== */
+@media (max-width:640px){
+  .gradio-container{padding:6px 8px 24px!important}
+  .hd-title{font-size:19px}
+  .hd-sub{font-size:12px}
+  .result-img img{max-height:56vh!important}
+  .rc{padding:12px 14px}
+  .rc-title{font-size:15.5px}
+  .rc-sub{font-size:12.5px}
+  .res-table .table-wrap, .res-table table{font-size:12px!important}
+}
 """
 
 
@@ -396,9 +397,7 @@ def build_ui():
     real_samples = _globs(BASE_DIR / "real_test" / "images")       # ภาพถ่ายจริงระดับ scene
     model_choices = list(_available_models())
 
-    with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก",
-                   theme=gr.themes.Soft(primary_hue="blue", neutral_hue="gray"),
-                   css=_CSS) as demo:
+    with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก") as demo:
         gr.HTML(
             "<div class='hd'>"
             "<div class='hd-title'>ตรวจจับตำหนิพื้นผิวเหล็ก</div>"
@@ -410,9 +409,9 @@ def build_ui():
 
         with gr.Row(equal_height=False):
             # ----- ซ้าย: อินพุต -----
-            with gr.Column(scale=5, min_width=320):
+            with gr.Column(scale=5, min_width=300):
                 inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ",
-                               height=300, sources=["upload", "clipboard"])
+                               height=280, sources=["upload", "clipboard"])
                 gr.HTML("<div class='hint'>อัปโหลดหรือวางภาพ แล้วระบบตรวจให้อัตโนมัติ "
                         "(หรือกดปุ่มด้านล่างเพื่อตรวจซ้ำ)</div>")
                 btn = gr.Button("ตรวจสอบ", variant="primary", size="lg")
@@ -436,15 +435,16 @@ def build_ui():
                                 label="ภาพตัวอย่าง (กดเพื่อตรวจ)", examples_per_page=16)
 
             # ----- ขวา: ผลสรุป -----
-            with gr.Column(scale=5, min_width=340):
+            with gr.Column(scale=5, min_width=300):
                 status = gr.HTML(_empty_banner())
                 table = gr.Dataframe(headers=TABLE_HEADERS, datatype=["str"] * 5,
-                                     col_count=(5, "fixed"), row_count=(1, "dynamic"),
+                                     row_count=(1, "dynamic"),
                                      interactive=False, wrap=True,
+                                     elem_classes=["res-table"],
                                      label="รายการตำหนิ (เรียงตามความเสี่ยง)")
 
-        # ----- ภาพผลลัพธ์ (เต็มความกว้าง) -----
-        out_img = gr.Image(type="numpy", label="ผลลัพธ์", height=560,
+        # ----- ภาพผลลัพธ์ (เต็มความกว้าง ปรับตามอัตราส่วนภาพ) -----
+        out_img = gr.Image(type="numpy", label="ผลลัพธ์",
                            interactive=False, elem_classes=["result-img"])
         gr.HTML("<div class='legend'>"
                 "<span class='lg lg-def'>กรอบแดง = ตำหนิที่ยืนยัน</span>"
@@ -452,11 +452,11 @@ def build_ui():
                 "<span class='lg lg-metal'>กรอบเขียว = บริเวณที่เป็นเหล็ก (เมื่อมีหลายบริเวณ)</span>"
                 "</div>")
 
-        # ----- Stage 1 (แสดงตลอด ไม่ซ่อนใน accordion) -----
-        out_s1 = gr.Image(type="numpy", height=420, interactive=False,
-                          elem_classes=["result-img"],
+        # ----- Stage 1 (แสดงตลอด) -----
+        out_s1 = gr.Image(type="numpy", interactive=False, elem_classes=["result-img"],
                           label="Stage 1 — พื้นที่ที่เป็นเหล็ก (เขียว = เหล็ก · ส้ม = ตรวจทั้งภาพ)")
-        info = gr.Markdown()
+        with gr.Accordion("รายละเอียดทางเทคนิค", open=False):
+            info = gr.Markdown()
 
         gr.HTML("<div class='foot'>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + ตรวจทั้งภาพเมื่อไม่พบ) "
                 "จากนั้น Stage 2: YOLO11n ตรวจตำหนิ 8 ชนิด · โมเดลเทรนจาก NEU-DET + Roboflow "
@@ -520,4 +520,6 @@ if __name__ == "__main__":
         print("กำลังสร้างลิงก์สาธารณะ *.gradio.live ... (รอสักครู่)")
     print()
 
-    build_ui().queue().launch(server_name=host, server_port=args.port, share=args.share)
+    build_ui().queue().launch(
+        server_name=host, server_port=args.port, share=args.share,
+        theme=gr.themes.Soft(primary_hue="blue", neutral_hue="gray"), css=_CSS)
