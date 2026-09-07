@@ -27,6 +27,9 @@ from ultralytics import YOLO
 BASE_DIR = Path(__file__).resolve().parent
 STAGE1_MODEL_PATH = BASE_DIR / "DMS46_v1.pt"
 STAGE2_MODEL_PATH = BASE_DIR / "runs" / "detect" / "train-gray-n2" / "weights" / "best.pt"
+# เล่มจบใช้ train-gray-n2 (yolo11n, grayscale, NEU/merged benchmark) — test mAP50 0.867 ± 0.010 (n=4)
+# ราง product/future-work: train-real1 (= config เดียวกัน + 672 ภาพ corrosion จริง, RGB, --recipe camera)
+#   กู้ rust recall บนภาพถ่ายจริง 0/12 -> 8/12 — เรียกใช้แบบ opt-in: pipeline.py --weights runs/detect/train-real1/weights/best.pt
 THRESHOLDS_PATH = BASE_DIR / "thresholds.json"  # per-class conf (ถ้ามี) — สร้างด้วย tune_thresholds.py
 
 # DMS46 ทำนายเป็น index 0-45 (เรียงจาก taxonomy 46 ชนิดที่โมเดลรองรับ)

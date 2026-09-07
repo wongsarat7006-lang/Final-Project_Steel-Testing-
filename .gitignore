@@ -36,3 +36,8 @@ __pycache__/
 
 # Cross-dataset test images (โหลดใหม่ได้จาก HF — ดู cross_dataset_eval.md)
 external_test/*/images/
+
+# ภาพถ่ายจริง / dataset ที่โหลดจากเน็ต + ผลของ active-learning loop (ไฟล์ใหญ่)
+downloads/
+photos_round*/
+dataset_real/

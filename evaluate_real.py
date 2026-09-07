@@ -148,8 +148,13 @@ def main():
     ap.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     ap.add_argument("--no-class-conf", action="store_true",
                     help="ไม่ใช้ per-class threshold จาก thresholds.json")
+    ap.add_argument("--weights", default=None,
+                    help="Stage 2 .pt (ไม่ระบุ = ใช้ STAGE2_MODEL_PATH ใน pipeline.py)")
     ap.add_argument("--out", default=str(BASE_DIR / "real_test_results.json"))
     args = ap.parse_args()
+
+    if args.weights:
+        P.STAGE2_MODEL_PATH = Path(args.weights)
 
     root = Path(args.dir)
     img_dir = root / "images"
