@@ -166,26 +166,18 @@ def _status_html(confirmed, tentative):
                  "ระบบไม่พบตำหนิในภาพนี้ (ถ้าเป็นภาพสไตล์ที่โมเดลไม่คุ้น อาจพลาดได้)")
 
 
-def _rows_table(confirmed, tentative):
-    rows = ([dict(r, _muted=False) for r in confirmed]
-            + [dict(r, _muted=True) for r in tentative])
-    if not rows:
-        return ""
-    head = ("<tr><th>บริเวณ</th><th>ชนิดตำหนิ</th>"
-            "<th>ความมั่นใจ</th><th>ความเสี่ยง</th></tr>")
-    body = []
-    for r in rows:
-        bg, fg = _RISK_COLOR.get(r["risk"], ("#eef0f3", "#586070"))
-        chip = (f"<span class='rt-chip' style='background:{bg};color:{fg}'>{r['risk']}</span>")
-        conf = f"{r['conf']:.0%}" + ("  <span class='rt-tag'>ต่ำกว่าเกณฑ์</span>" if r["_muted"] else "")
-        body.append(
-            f"<tr class='{'rt-muted' if r['_muted'] else ''}'>"
-            f"<td>{r['tag']}</td>"
-            f"<td><span class='rt-name'>{r['name_th']}</span>"
-            f"<span class='rt-cls'>{r['class']}</span></td>"
-            f"<td>{conf}</td><td>{chip}</td></tr>")
-    return (f"<table class='rt'><thead>{head}</thead>"
-            f"<tbody>{''.join(body)}</tbody></table>")
+TABLE_HEADERS = ["บริเวณ", "ชนิดตำหนิ", "คลาส", "ความมั่นใจ", "ความเสี่ยง"]
+
+
+def _rows_data(confirmed, tentative):
+    """คืนข้อมูลตารางเป็น list-of-rows สำหรับ gr.Dataframe (ยืนยันก่อน แล้วตามด้วย 'อาจมี')"""
+    out = []
+    for r in confirmed:
+        out.append([r["tag"], r["name_th"], r["class"], f"{r['conf']:.0%}", r["risk"]])
+    for r in tentative:
+        out.append([r["tag"], r["name_th"], r["class"],
+                    f"{r['conf']:.0%} (อาจมี)", r["risk"]])
+    return out
 
 
 def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress=gr.Progress()):
@@ -196,12 +188,12 @@ def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress
         traceback.print_exc()
         return (None, None,
                 _card("danger", "ประมวลผลภาพนี้ไม่สำเร็จ", str(e)),
-                "", f"`{type(e).__name__}: {e}`")
+                [], f"`{type(e).__name__}: {e}`")
 
 
 def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progress):
     if image_rgb is None:
-        return None, None, _empty_banner(), "", ""
+        return None, None, _empty_banner(), [], ""
 
     image_bgr = _to_bgr(image_rgb)
 
@@ -335,7 +327,7 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, progres
         status = _status_html(confirmed, tentative)
 
     return (cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), stage1_img,
-            status, _rows_table(confirmed, tentative), info_md)
+            status, _rows_data(confirmed, tentative), info_md)
 
 
 def _globs(d):
@@ -406,56 +398,58 @@ def build_ui():
         )
 
         with gr.Row(equal_height=False):
-            with gr.Column(scale=4, min_width=300):
+            # ----- ซ้าย: อินพุต -----
+            with gr.Column(scale=5, min_width=320):
                 inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ",
                                height=300, sources=["upload", "clipboard"])
-                gr.HTML("<div class='hint'>อัปโหลดหรือวางภาพ แล้วระบบตรวจให้อัตโนมัติ</div>")
-                sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
-                                label="โหมดความไว",
-                                info="ภาพที่โมเดลไม่คุ้น เพิ่มเป็น ไว / ไวมาก ได้ "
-                                     "(เตือนมากขึ้น แต่พลาดน้อยลง)")
+                gr.HTML("<div class='hint'>อัปโหลดหรือวางภาพ แล้วระบบตรวจให้อัตโนมัติ "
+                        "(หรือกดปุ่มด้านล่างเพื่อตรวจซ้ำ)</div>")
+                btn = gr.Button("ตรวจสอบ", variant="primary", size="lg")
                 with gr.Accordion("ตัวเลือกขั้นสูง", open=False):
                     model_sel = gr.Radio(
                         model_choices, value=model_choices[0] if model_choices else None,
                         label="โมเดล Stage 2",
-                        info="ปรับโดเมน = เทรนเพิ่มด้วยภาพถ่ายจริง (ยิงบนภาพถ่ายจริงได้ดีกว่า) · "
-                             "เล่มจบ = ตัวที่รายงานตัวเลขในเล่ม (grayscale, NEU benchmark)")
+                        info="ปรับโดเมน = เทรนเพิ่มด้วยภาพถ่ายจริง · เล่มจบ = grayscale, NEU benchmark")
+                    sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
+                                    label="โหมดความไว",
+                                    info="ภาพที่โมเดลไม่คุ้น เพิ่มเป็น ไว / ไวมาก (เตือนมากขึ้น พลาดน้อยลง)")
                     conf = gr.Slider(0.1, 0.9, value=0.4, step=0.05,
-                                     label="Confidence ขั้นต่ำ (คลาสที่ไม่มีในไฟล์ threshold)")
-                    detailed = gr.Checkbox(
-                        value=False, label="ตรวจละเอียด (test-time augmentation)",
-                        info="ช้าลงราว 2–3 เท่า แลกกับ recall ที่ดีขึ้นเล็กน้อย")
+                                     label="Confidence ขั้นต่ำ (Stage 2)")
+                    detailed = gr.Checkbox(value=False, label="ตรวจละเอียด (TTA — ช้าลง 2–3 เท่า)")
                     gate_on = gr.Checkbox(
                         value=steel_gate.available(), interactive=steel_gate.available(),
-                        label="Stage 0: ตัวจำแนกพื้นผิวเหล็ก",
-                        info=("ช่วยตอบ ไม่พบพื้นผิวเหล็ก เมื่อ Stage 1/2 และตัวจำแนกเห็นตรงกันว่าไม่ใช่เหล็ก"
-                              if steel_gate.available()
-                              else "ยังไม่มีโมเดล gate — รัน train_gate.py ก่อน"))
-                    btn = gr.Button("ประมวลผลใหม่", variant="secondary", size="sm")
+                        label="Stage 0: เช็คว่าเป็นพื้นผิวเหล็กก่อน",
+                        info=("" if steel_gate.available() else "ยังไม่มีโมเดล gate — รัน train_gate.py"))
+                if lab_samples or real_samples:
+                    gr.Examples(examples=(lab_samples + real_samples), inputs=inp,
+                                label="ภาพตัวอย่าง (กดเพื่อตรวจ)", examples_per_page=16)
 
-            with gr.Column(scale=6, min_width=340):
+            # ----- ขวา: ผลสรุป -----
+            with gr.Column(scale=5, min_width=340):
                 status = gr.HTML(_empty_banner())
+                table = gr.Dataframe(headers=TABLE_HEADERS, datatype=["str"] * 5,
+                                     col_count=(5, "fixed"), row_count=(1, "dynamic"),
+                                     interactive=False, wrap=True,
+                                     label="รายการตำหนิ (เรียงตามความเสี่ยง)")
 
-        out_img = gr.Image(type="numpy", label="ผลตรวจ", height=620,
+        # ----- ภาพผลลัพธ์ (เต็มความกว้าง) -----
+        out_img = gr.Image(type="numpy", label="ผลลัพธ์", height=560,
                            interactive=False, elem_classes=["result-img"])
         gr.HTML("<div class='legend'>"
                 "<span class='lg lg-def'>กรอบแดง = ตำหนิที่ยืนยัน</span>"
                 "<span class='lg lg-may'>กรอบส้ม = อาจมี</span>"
-                "<span class='lg lg-metal'>กรอบเขียว = บริเวณที่เป็นเหล็ก (เฉพาะเมื่อมีหลายบริเวณ)</span>"
+                "<span class='lg lg-metal'>กรอบเขียว = บริเวณที่เป็นเหล็ก (เมื่อมีหลายบริเวณ)</span>"
                 "</div>")
-        table = gr.HTML()
-        with gr.Accordion("การทำงานภายใน (Stage 1 + ข้อมูลเทคนิค)", open=False):
-            out_s1 = gr.Image(type="numpy",
-                              label="Stage 1 — บริเวณที่เป็นเหล็ก (เขียว) / ตรวจทั้งภาพ (ส้ม)",
-                              height=440)
-            info = gr.Markdown()
 
-        gr.HTML(
-            "<div class='foot'>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + ตรวจทั้งภาพเมื่อไม่พบ) "
-            "จากนั้น Stage 2: YOLO11n ตรวจตำหนิ 8 ชนิด. โมเดลเทรนจาก NEU-DET + Roboflow "
-            "(บวกภาพถ่ายจริงสำหรับตัว ปรับโดเมน). ภาพสไตล์อื่นอาจพลาด — เพิ่มโหมดความไว "
-            "หรือสลับโมเดลใน ตัวเลือกขั้นสูง</div>"
-        )
+        # ----- Stage 1 (แสดงตลอด ไม่ซ่อนใน accordion) -----
+        out_s1 = gr.Image(type="numpy", height=420, interactive=False,
+                          elem_classes=["result-img"],
+                          label="Stage 1 — พื้นที่ที่เป็นเหล็ก (เขียว = เหล็ก · ส้ม = ตรวจทั้งภาพ)")
+        info = gr.Markdown()
+
+        gr.HTML("<div class='foot'>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + ตรวจทั้งภาพเมื่อไม่พบ) "
+                "จากนั้น Stage 2: YOLO11n ตรวจตำหนิ 8 ชนิด · โมเดลเทรนจาก NEU-DET + Roboflow "
+                "(+ ภาพถ่ายจริงสำหรับตัว “ปรับโดเมน”)</div>")
 
         outputs = [out_img, out_s1, status, table, info]
         ins = [inp, conf, detailed, sens, model_sel, gate_on]
@@ -464,13 +458,6 @@ def build_ui():
         sens.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
         model_sel.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
         gate_on.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
-
-        if real_samples:
-            gr.Examples(examples=real_samples, inputs=inp, label="ภาพถ่ายจริง",
-                        examples_per_page=12)
-        if lab_samples:
-            gr.Examples(examples=lab_samples, inputs=inp,
-                        label="ภาพตัวอย่างชุด benchmark (ครบ 8 คลาส)", examples_per_page=12)
     return demo
 
 
