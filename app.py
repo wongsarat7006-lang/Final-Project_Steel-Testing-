@@ -46,14 +46,14 @@ def _available_models():
 
 _STATE = {"s1": None, "device": None, "class_conf": None, "s2_cache": {}, "cc_cache": {}}
 
-# ระดับความเสี่ยง -> ลำดับการแสดงผล (สูงก่อน) + สีชิป
+# ระดับความเสี่ยง -> ลำดับการแสดงผล (สูงก่อน) + สีชิป (โทนอ่อน อ่านสบายตา)
 _RISK_ORDER = {"สูง": 0, "ปานกลาง-สูง": 1, "ปานกลาง": 2, "ต่ำ-ปานกลาง": 3, "ต่ำ": 4}
 _RISK_COLOR = {
-    "สูง": ("#fdecea", "#b71c1c"),
-    "ปานกลาง-สูง": ("#fff0e6", "#c05600"),
-    "ปานกลาง": ("#fff8e1", "#8a6d00"),
-    "ต่ำ-ปานกลาง": ("#e8f0fe", "#1a56c4"),
-    "ต่ำ": ("#eef1f4", "#5a6270"),
+    "สูง": ("#f7e9e7", "#9c3a2f"),
+    "ปานกลาง-สูง": ("#f7efe4", "#8a5a1c"),
+    "ปานกลาง": ("#f5f1e3", "#77661f"),
+    "ต่ำ-ปานกลาง": ("#eaeef5", "#3f567f"),
+    "ต่ำ": ("#eef0f3", "#586070"),
 }
 _HIGH_RISK = ("สูง", "ปานกลาง-สูง")
 
@@ -126,84 +126,80 @@ def _stage1_view(image_bgr, mask, boxes, meta):
 
 
 # ---------- HTML rendering ----------
-def _banner(bg, fg, text, sub=""):
-    sub_html = f"<div style='font-size:13px;font-weight:400;margin-top:4px;opacity:.85'>{sub}</div>" if sub else ""
-    return (f"<div style='padding:16px 20px;border-radius:12px;background:{bg};color:{fg};"
-            f"font-size:19px;font-weight:700;line-height:1.35'>{text}{sub_html}</div>")
+# state -> สีเส้นขอบซ้ายของการ์ดสรุปผล (โทนเดียวกับ _RISK_COLOR — เรียบ ไม่มีพื้นสีจัด)
+_STATE_ACCENT = {
+    "danger": "#c0503f", "warn": "#b07d3a", "maybe": "#8b93a1",
+    "ok": "#4b8f6d", "neutral": "#c2c9d2",
+}
+
+
+def _card(state, title, sub=""):
+    accent = _STATE_ACCENT.get(state, _STATE_ACCENT["neutral"])
+    sub_html = f"<div class='rc-sub'>{sub}</div>" if sub else ""
+    return (f"<div class='rc' style='border-left-color:{accent}'>"
+            f"<div class='rc-kicker'>ผลการตรวจ</div>"
+            f"<div class='rc-title'>{title}</div>{sub_html}</div>")
 
 
 def _empty_banner():
-    return _banner("#eef1f4", "#5a6270", "⬆️ อัปโหลดภาพเหล็ก แล้วกด “ตรวจสอบ”",
-                   "หรือเลือกจากตัวอย่างภาพด้านล่าง")
+    return _card("neutral", "ยังไม่มีผล",
+                 "อัปโหลดหรือวางภาพเหล็ก ระบบจะตรวจให้อัตโนมัติ — หรือเลือกจากภาพตัวอย่างด้านล่าง")
 
 
 def _status_html(confirmed, tentative):
     if confirmed:
         kinds = sorted({r["name_th"] for r in confirmed})
         risky = sorted({r["name_th"] for r in confirmed if r["risk"] in _HIGH_RISK})
+        extra = f" · อาจมีเพิ่มอีก {len(tentative)} จุด" if tentative else ""
         if risky:
-            return _banner("#fdecea", "#b71c1c",
-                           "🔴 พบตำหนิความเสี่ยงสูง: " + ", ".join(risky),
-                           f"รวมทั้งหมด {len(kinds)} ชนิด: " + ", ".join(kinds))
-        return _banner("#fff4e5", "#b26a00",
-                       f"⚠️ พบตำหนิ {len(kinds)} ชนิด: " + ", ".join(kinds),
-                       "ไม่มีชนิดที่จัดเป็นความเสี่ยงสูง")
+            return _card("danger", "พบตำหนิความเสี่ยงสูง",
+                         ", ".join(risky) + f"  (รวมทั้งหมด {len(kinds)} ชนิด){extra}")
+        return _card("warn", f"พบตำหนิ {len(kinds)} ชนิด",
+                     ", ".join(kinds) + "  ไม่มีชนิดที่จัดเป็นความเสี่ยงสูง" + extra)
     if tentative:
         kinds = sorted({r["name_th"] for r in tentative})
-        return _banner("#fff8e1", "#8a6d00",
-                       "🔍 อาจมีตำหนิ (ความมั่นใจต่ำ): " + ", ".join(kinds),
-                       "ต่ำกว่าเกณฑ์ — แนะนำให้ตรวจซ้ำด้วยตา หรือเพิ่มโหมดความไว")
-    return _banner("#e6f4ea", "#1e7e34", "✅ ไม่พบตำหนิพื้นผิว",
-                   "ระบบไม่พบตำหนิในภาพนี้ (อาจเป็นภาพนอกโดเมนที่โมเดลไม่คุ้น)")
+        return _card("maybe", "อาจมีตำหนิ (ความมั่นใจต่ำ)",
+                     ", ".join(kinds) + "  ต่ำกว่าเกณฑ์ — แนะนำให้ตรวจซ้ำด้วยตา หรือปรับโหมดความไวขึ้น")
+    return _card("ok", "ไม่พบตำหนิพื้นผิว",
+                 "ระบบไม่พบตำหนิในภาพนี้ (ถ้าเป็นภาพสไตล์ที่โมเดลไม่คุ้น อาจพลาดได้)")
 
 
-def _rows_table(rows, muted=False):
+def _rows_table(confirmed, tentative):
+    rows = ([dict(r, _muted=False) for r in confirmed]
+            + [dict(r, _muted=True) for r in tentative])
     if not rows:
         return ""
-    op = "opacity:.75;" if muted else ""
-    head = ("<tr style='background:#f4f6fa;text-align:left'>"
-            "<th style='padding:8px 10px'>บริเวณ</th>"
-            "<th style='padding:8px 10px'>ชนิดตำหนิ</th>"
-            "<th style='padding:8px 10px'>ความมั่นใจ</th>"
-            "<th style='padding:8px 10px'>ความเสี่ยง</th></tr>")
+    head = ("<tr><th>บริเวณ</th><th>ชนิดตำหนิ</th>"
+            "<th>ความมั่นใจ</th><th>ความเสี่ยง</th></tr>")
     body = []
     for r in rows:
-        bg, fg = _RISK_COLOR.get(r["risk"], ("#eee", "#333"))
-        chip = (f"<span style='background:{bg};color:{fg};padding:2px 10px;"
-                f"border-radius:999px;font-size:12px;font-weight:700'>{r['risk']}</span>")
+        bg, fg = _RISK_COLOR.get(r["risk"], ("#eef0f3", "#586070"))
+        chip = (f"<span class='rt-chip' style='background:{bg};color:{fg}'>{r['risk']}</span>")
+        conf = f"{r['conf']:.0%}" + ("  <span class='rt-tag'>ต่ำกว่าเกณฑ์</span>" if r["_muted"] else "")
         body.append(
-            "<tr style='border-top:1px solid #e6e8ec'>"
-            f"<td style='padding:8px 10px'>{r['tag']}</td>"
-            f"<td style='padding:8px 10px'><b>{r['name_th']}</b> "
-            f"<span style='color:#8a929e;font-size:12px'>{r['class']}</span></td>"
-            f"<td style='padding:8px 10px'>{r['conf']:.0%}</td>"
-            f"<td style='padding:8px 10px'>{chip}</td></tr>")
-    return (f"<table style='width:100%;border-collapse:collapse;font-size:14px;{op}'>"
-            f"<thead>{head}</thead><tbody>{''.join(body)}</tbody></table>")
-
-
-def _tentative_html(rows):
-    if not rows:
-        return ""
-    return ("<div style='margin-top:6px'><div style='font-weight:700;color:#8a6d00;"
-            "margin-bottom:4px'>🔍 อาจมีตำหนิ — ความมั่นใจต่ำกว่าเกณฑ์ (ตรวจซ้ำด้วยตา)</div>"
-            + _rows_table(rows, muted=True) + "</div>")
+            f"<tr class='{'rt-muted' if r['_muted'] else ''}'>"
+            f"<td>{r['tag']}</td>"
+            f"<td><span class='rt-name'>{r['name_th']}</span>"
+            f"<span class='rt-cls'>{r['class']}</span></td>"
+            f"<td>{conf}</td><td>{chip}</td></tr>")
+    return (f"<table class='rt'><thead>{head}</thead>"
+            f"<tbody>{''.join(body)}</tbody></table>")
 
 
 def analyze(image_rgb, conf, detailed, sensitivity, model_key, progress=gr.Progress()):
     try:
         return _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress)
-    except Exception as e:                       # เดโมต้องไม่ค้าง — โชว์ error เป็น banner แทน stack trace
+    except Exception as e:                       # เดโมต้องไม่ค้าง — โชว์ error เป็นการ์ดแทน stack trace
         import traceback
         traceback.print_exc()
         return (None, None,
-                _banner("#fdecea", "#b71c1c", "⚠️ ประมวลผลภาพนี้ไม่สำเร็จ", str(e)),
-                "", "", f"`{type(e).__name__}: {e}`")
+                _card("danger", "ประมวลผลภาพนี้ไม่สำเร็จ", str(e)),
+                "", f"`{type(e).__name__}: {e}`")
 
 
 def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
     if image_rgb is None:
-        return None, None, _empty_banner(), "", "", ""
+        return None, None, _empty_banner(), "", ""
 
     progress(0.1, desc="โหลดโมเดล...")
     s1, s2, device = _ensure_models(model_key)
@@ -304,8 +300,8 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
         info_md += "\n\n" + "\n".join("- " + n for n in notes)
 
     return (cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), stage1_img,
-            _status_html(confirmed, tentative), _rows_table(confirmed),
-            _tentative_html(tentative), info_md)
+            _status_html(confirmed, tentative),
+            _rows_table(confirmed, tentative), info_md)
 
 
 def _globs(d):
@@ -313,75 +309,120 @@ def _globs(d):
             if p.suffix.lower() in P.IMAGE_EXTS] if d.exists() else []
 
 
+_CSS = """
+footer{display:none!important}
+.gradio-container{max-width:1120px!important;margin:0 auto!important}
+.hd{padding:6px 2px 14px}
+.hd-title{font-size:22px;font-weight:650;color:#1f2530;letter-spacing:.2px}
+.hd-sub{font-size:13.5px;color:#5b6470;margin-top:5px;line-height:1.5}
+.hd-note{font-size:12px;color:#98a0ab;margin-top:3px}
+.hint{font-size:12px;color:#8a929e;margin:-2px 0 8px}
+/* การ์ดสรุปผล */
+.rc{border:1px solid #e4e7ec;border-left:4px solid #c2c9d2;border-radius:10px;
+    padding:13px 16px;background:#fff}
+.rc-kicker{font-size:10.5px;letter-spacing:.1em;color:#9aa2ad;text-transform:uppercase}
+.rc-title{font-size:17px;font-weight:600;color:#232a35;line-height:1.35;margin-top:2px}
+.rc-sub{font-size:13px;color:#606a78;margin-top:5px;line-height:1.5}
+/* legend ใต้ภาพผล */
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:8px 2px 2px}
+.lg{font-size:11.5px;color:#6b7280;display:flex;align-items:center}
+.lg::before{content:"";width:11px;height:11px;border-radius:3px;margin-right:6px;
+    border:1px solid rgba(0,0,0,.15)}
+.lg-def::before{background:#c0503f}
+.lg-may::before{background:#fff;border:1px solid #c98c46}
+.lg-metal::before{background:#8fc7a0}
+/* ตารางผล */
+table.rt{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+table.rt th{text-align:left;font-weight:600;color:#6b7280;font-size:11.5px;
+    letter-spacing:.04em;padding:7px 10px;border-bottom:1px solid #e4e7ec}
+table.rt td{padding:9px 10px;border-bottom:1px solid #eef0f3;color:#2b323d;vertical-align:middle}
+table.rt tr:last-child td{border-bottom:none}
+.rt-name{font-weight:600}
+.rt-cls{color:#9aa2ad;font-size:11.5px;margin-left:7px}
+.rt-chip{padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.rt-tag{color:#9aa2ad;font-size:11px}
+tr.rt-muted td{color:#8a929e}
+tr.rt-muted .rt-name{font-weight:500;color:#6b7280}
+.foot{font-size:11.5px;color:#98a0ab;line-height:1.6;padding:14px 2px 2px;
+    border-top:1px solid #eef0f3;margin-top:16px}
+"""
+
+
 def build_ui():
     lab_samples = _globs(BASE_DIR / "test_images")                 # NEU/Rust crop — โชว์ครบ 8 คลาส
     real_samples = _globs(BASE_DIR / "real_test" / "images")       # ภาพถ่ายจริงระดับ scene
     model_choices = list(_available_models())
 
-    with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก") as demo:
-        gr.Markdown(
-            "<div class='main-title'>\n\n"
-            "# 🔎 ตรวจจับตำหนิพื้นผิวเหล็ก\n"
-            "ผู้ช่วยคัดกรองสภาพผิวเหล็กจากภาพถ่าย — ตรวจตำหนิ 8 ชนิด "
-            "(รอยแตกลายงา · สิ่งแปลกปลอม · ผิวลอก · ผิวเป็นหลุม · สะเก็ดรีด · รอยขีดข่วน · สนิม · รอยแตกร้าว)\n"
-            "<sub>prototype เพื่อการศึกษา — ไม่ใช่ระบบตรวจสอบใช้งานจริง</sub>\n\n</div>"
+    with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก",
+                   theme=gr.themes.Soft(primary_hue="slate", neutral_hue="slate"),
+                   css=_CSS) as demo:
+        gr.HTML(
+            "<div class='hd'>"
+            "<div class='hd-title'>ตรวจจับตำหนิพื้นผิวเหล็ก</div>"
+            "<div class='hd-sub'>ผู้ช่วยคัดกรองสภาพผิวเหล็กจากภาพถ่าย · ตรวจตำหนิ 8 ชนิด "
+            "(รอยแตกลายงา, สิ่งแปลกปลอม, ผิวลอก, ผิวเป็นหลุม, สะเก็ดรีด, รอยขีดข่วน, สนิม, รอยแตกร้าว)</div>"
+            "<div class='hd-note'>prototype เพื่อการศึกษา — ไม่ใช่ระบบตรวจสอบใช้งานจริง</div>"
+            "</div>"
         )
 
         with gr.Row(equal_height=False):
-            with gr.Column(scale=5):
+            with gr.Column(scale=5, min_width=320):
                 inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ",
-                               height=340, sources=["upload", "clipboard"])
-                btn = gr.Button("ตรวจสอบ", variant="primary", size="lg")
-                gr.Markdown("<sub>อัปโหลด/วางภาพ แล้วระบบตรวจให้อัตโนมัติ</sub>")
+                               height=320, sources=["upload", "clipboard"])
+                gr.HTML("<div class='hint'>อัปโหลดหรือวางภาพ แล้วระบบตรวจให้อัตโนมัติ</div>")
                 sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
                                 label="โหมดความไว",
-                                info="ภาพถ่ายเองที่โมเดลไม่คุ้น ลองเพิ่มเป็น “ไว/ไวมาก” "
-                                     "(เตือนเยอะขึ้น แต่พลาดน้อยลง)")
-                if real_samples:
-                    gr.Examples(examples=real_samples, inputs=inp,
-                                label="ภาพถ่ายจริง (กดเพื่อตรวจ)", examples_per_page=12)
-                if lab_samples:
-                    gr.Examples(examples=lab_samples, inputs=inp,
-                                label="ภาพตัวอย่างจากชุด benchmark — ครบ 8 คลาส (กดเพื่อตรวจ)",
-                                examples_per_page=12)
+                                info="ภาพที่โมเดลไม่คุ้น เพิ่มเป็น ไว / ไวมาก ได้ "
+                                     "(เตือนมากขึ้น แต่พลาดน้อยลง)")
                 with gr.Accordion("ตัวเลือกขั้นสูง", open=False):
                     model_sel = gr.Radio(
                         model_choices, value=model_choices[0] if model_choices else None,
                         label="โมเดล Stage 2",
-                        info="“ปรับโดเมน” เทรนเพิ่มด้วยภาพถ่ายจริง — ยิงบนภาพถ่ายจริงได้ดีกว่า ; "
-                             "“เล่มจบ” เป็นตัวที่รายงานตัวเลขในเล่ม (grayscale, NEU benchmark)")
+                        info="ปรับโดเมน = เทรนเพิ่มด้วยภาพถ่ายจริง (ยิงบนภาพถ่ายจริงได้ดีกว่า) · "
+                             "เล่มจบ = ตัวที่รายงานตัวเลขในเล่ม (grayscale, NEU benchmark)")
                     conf = gr.Slider(0.1, 0.9, value=0.4, step=0.05,
-                                     label="Confidence ขั้นต่ำ (คลาสที่ไม่มีใน thresholds.json)")
+                                     label="Confidence ขั้นต่ำ (คลาสที่ไม่มีในไฟล์ threshold)")
                     detailed = gr.Checkbox(
                         value=False, label="ตรวจละเอียด (test-time augmentation)",
-                        info="ช้าลง ~2–3 เท่า, recall ดีขึ้นเล็กน้อย")
+                        info="ช้าลงราว 2–3 เท่า แลกกับ recall ที่ดีขึ้นเล็กน้อย")
+                    btn = gr.Button("ประมวลผลใหม่", variant="secondary", size="sm")
 
-            with gr.Column(scale=7):
+            with gr.Column(scale=7, min_width=360):
                 status = gr.HTML(_empty_banner())
-                out_img = gr.Image(type="numpy",
-                                   label="ผลตรวจ (แดงทึบ = ตำหนิ, ส้มบาง = อาจมี, เขียว = บริเวณเหล็ก)",
-                                   height=380)
+                out_img = gr.Image(type="numpy", label="ผลตรวจ", height=380,
+                                   interactive=False)
+                gr.HTML("<div class='legend'>"
+                        "<span class='lg lg-def'>กรอบทึบ = ตำหนิที่ยืนยัน</span>"
+                        "<span class='lg lg-may'>กรอบบาง = อาจมี</span>"
+                        "<span class='lg lg-metal'>พื้นเขียว = บริเวณที่เป็นเหล็ก</span>"
+                        "</div>")
                 table = gr.HTML()
-                tentative = gr.HTML()
-                with gr.Accordion("รายละเอียดการทำงาน (Stage 1 + เทคนิค)", open=False):
+                with gr.Accordion("การทำงานภายใน (Stage 1 + ข้อมูลเทคนิค)", open=False):
                     out_s1 = gr.Image(type="numpy",
-                                      label="Stage 1 — พื้นที่ที่เป็นเหล็ก (เขียว) / fallback ทั้งภาพ (ส้ม)",
-                                      height=300)
+                                      label="Stage 1 — บริเวณที่เป็นเหล็ก (เขียว) / ตรวจทั้งภาพ (ส้ม)",
+                                      height=280)
                     info = gr.Markdown()
 
-        gr.Markdown(
-            "<sub>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + fallback ทั้งภาพ) → "
-            "Stage 2: YOLO11n ตรวจตำหนิ 8 ชนิด. โมเดลเทรนจาก NEU-DET + Roboflow (+ ภาพถ่ายจริง "
-            "สำหรับตัว “ปรับโดเมน”). ภาพสไตล์อื่นอาจพลาด — เพิ่มโหมดความไว หรือสลับโมเดลใน "
-            "“ตัวเลือกขั้นสูง” ช่วยได้</sub>"
+        gr.HTML(
+            "<div class='foot'>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + ตรวจทั้งภาพเมื่อไม่พบ) "
+            "จากนั้น Stage 2: YOLO11n ตรวจตำหนิ 8 ชนิด. โมเดลเทรนจาก NEU-DET + Roboflow "
+            "(บวกภาพถ่ายจริงสำหรับตัว ปรับโดเมน). ภาพสไตล์อื่นอาจพลาด — เพิ่มโหมดความไว "
+            "หรือสลับโมเดลใน ตัวเลือกขั้นสูง</div>"
         )
 
-        outputs = [out_img, out_s1, status, table, tentative, info]
+        outputs = [out_img, out_s1, status, table, info]
         ins = [inp, conf, detailed, sens, model_sel]
         btn.click(analyze, inputs=ins, outputs=outputs)
         inp.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
         sens.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
         model_sel.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
+
+        if real_samples:
+            gr.Examples(examples=real_samples, inputs=inp, label="ภาพถ่ายจริง",
+                        examples_per_page=12)
+        if lab_samples:
+            gr.Examples(examples=lab_samples, inputs=inp,
+                        label="ภาพตัวอย่างชุด benchmark (ครบ 8 คลาส)", examples_per_page=12)
     return demo
 
 
@@ -433,6 +474,4 @@ if __name__ == "__main__":
         print("กำลังสร้างลิงก์สาธารณะ *.gradio.live ... (รอสักครู่)")
     print()
 
-    _CSS = ".main-title{text-align:center} footer{visibility:hidden}"
-    build_ui().queue().launch(server_name=host, server_port=args.port, share=args.share,
-                              theme=gr.themes.Soft(), css=_CSS)
+    build_ui().queue().launch(server_name=host, server_port=args.port, share=args.share)
