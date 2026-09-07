@@ -1,5 +1,10 @@
 # งานที่เหลือ — runbook
 
+> **สถานะ 2026-09-07:** multi-seed (n=4), leakage fix, real_test (18 ภาพ), Stage 1 ablation — **เสร็จหมด**
+> เหลืองานเดียวที่เป็น blocker เล่มจบ: **เคลียร์ baseline กับอาจารย์** (ขั้น 4 ข้อ 3)
+> ที่เหลือเป็น optional: ขยาย real_test ให้ครบคลาส + เติม URL, และราง product (`DATA_COLLECTION.md`)
+> รายละเอียดผลล่าสุดอยู่ใน `thesis_notes.md` (ตารางท้ายไฟล์) และ README หัวข้อ "Pipeline end-to-end vs Baseline"
+
 รันทุกคำสั่งจากโฟลเดอร์ `C:\Users\Lenovo\steel-defect-detection` โดย **activate venv ก่อน**:
 
 ```powershell
@@ -35,11 +40,9 @@ cd C:\Users\Lenovo\steel-defect-detection
 **ผลลัพธ์:** overall test mAP50 0.853 → **0.840** (s2) — ตกเล็กน้อย ตัวเลขเดิมเชื่อได้หลังแก้ ;
 `train-gray-n2` 0.867 ≥ s2 → model size ไม่ใช่ปัจจัยหลัก (ยืนยันชัดขึ้น)
 
-**ยังเหลือ — multi-seed (ขั้น 6):**
-
-รันบน **yolo11n** (train-gray-n2 config) เพราะเร็วกว่า yolo11s และ ablation แสดงว่า model size
-ไม่ต่างกัน — 3 รอบ ~3.5 ชม./รอบ = **~10-12 ชม.** รวม `train-gray-n2` ที่มีแล้ว (seed 0) เป็น 4 จุด
-**รันในหน้าต่าง PowerShell ของคุณเอง** (อยู่ข้ามคืนได้ ไม่ตายตามเซสชัน):
+**✅ multi-seed (ขั้น 6) — เสร็จแล้ว 2026-09-06:** `results/stage2_multiseed.json` (n=4)
+mAP50 0.867 ± 0.010 ; crack อ่อนสุด 0.687 ± 0.011 ; crazing/rolled-in_scale std ~0.05
+README + thesis_notes ใส่ตาราง mean ± std แล้ว. คำสั่งที่ใช้ (เก็บไว้ทำซ้ำ):
 
 ```powershell
 # seed 1,2,3 (seed 0 = train-gray-n2 มีแล้ว)
@@ -154,9 +157,14 @@ python tune_thresholds.py --weights runs/detect/train-gray-s/weights/best.pt --d
 
 ---
 
-## ขั้น 3 — ชุดทดสอบภาพเหล็กถ่ายจริง (`real_test/`)
+## ขั้น 3 — ชุดทดสอบภาพเหล็กถ่ายจริง (`real_test/`)  — ✅ รอบแรกเสร็จ (18 ภาพ)
 
 **นี่คือสิ่งเดียวที่พิสูจน์ได้ว่า Stage 1 (DMS46) มีประโยชน์จริงหรือควรตัดทิ้ง**
+
+> **สถานะ:** มี 18 ภาพ + labels.csv + `evaluate_real.py` รันแล้ว → ผลอยู่ใน README/`thesis_notes.md`
+> สรุป: Stage 1 = negative ablation ; โมเดลเล่มจบ transfer ≈ 0 บนภาพจริง
+> **optional ต่อ:** ขยายเป็น 40–60 ภาพให้ครบ 8 คลาส (ยังขาด inclusion/rolled-in_scale/crazing สิ้นเชิง)
+> + เติม URL ต้นทางทุกภาพลง `real_test/SOURCES.md` ก่อนอ้างในเล่ม
 
 ### 3.1 โฟลเดอร์
 `real_test\images\` + `real_test\labels.csv` (header) มีให้แล้ว — ดู `real_test\README.md`
@@ -219,8 +227,15 @@ python evaluate_real.py            # ทำทั้ง pipeline + baseline แ�
 
 ## สรุปสิ่งที่ต้องส่งกลับมา
 
-| จากขั้น | ไฟล์ | ผมจะทำต่อ |
+| จากขั้น | ไฟล์ | สถานะ |
 |---|---|---|
-| 1 | `results/stage2_train-gray-s.json` + `thresholds.json` + เลข mAP | เติมตารางเทียบใน README (Tier 1/2), รัน make_figures |
-| 3 | `real_test_results.json` | เติมตาราง Pipeline vs Baseline, confusion เทียบ |
-| 4 | คำตอบ 3 ข้อ | เขียนบทสรุป + ปรับ Limitations / ablation section |
+| 1 | `results/stage2_train-gray-*.json` + `thresholds.json` + multiseed | ✅ README/thesis_notes อัปเดตแล้ว |
+| 3 | `results/real_before_round1.json` / `real_after_round1.json` | ✅ ตาราง Pipeline vs Baseline ใน README แล้ว |
+| 4 ข้อ 1–2 | use case + Stage 1 | ✅ `thesis_notes.md` ข้อ 1–2 (Stage 1 = negative ablation) |
+| **4 ข้อ 3** | **baseline ที่อาจารย์ต้องการ** | ⏳ **ยังต้องถามอาจารย์** — คำถามร่างไว้ใน `thesis_notes.md` ท้ายไฟล์ |
+
+### สิ่งที่เหลือจริง ๆ ก่อนปิดเล่ม
+1. **ถามอาจารย์เรื่อง baseline** (คำถามพร้อมใน `thesis_notes.md`) — ได้คำตอบแล้วอาจต้องรันเพิ่ม 1 อย่าง
+2. (optional) ขยาย `real_test/` ให้ครบ 8 คลาส + เติม URL ต้นทาง
+3. (optional) เพิ่มข้อมูล crack จากแหล่งที่ 2 แล้ว retrain 4 seeds ถ้าอยากดัน crack ขึ้นจาก 0.687
+   — ไม่จำเป็นสำหรับเล่ม (รายงานเป็น limitation แล้ว)
