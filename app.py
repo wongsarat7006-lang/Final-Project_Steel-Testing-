@@ -118,10 +118,11 @@ def _stage1_view(image_bgr, mask, boxes, meta):
     green[:, :] = (0, 200, 0)
     m = mask.astype(bool)
     view[m] = cv2.addWeighted(view, 0.55, green, 0.45, 0)[m]
+    lw = max(2, round(max(view.shape[:2]) / 400))
     for i, (x, y, w, h) in enumerate(boxes):
         is_full = meta["fallback_full_image"] and i == len(boxes) - 1
         col = (0, 165, 255) if is_full else (0, 255, 0)  # ส้ม = fallback ทั้งภาพ
-        cv2.rectangle(view, (x, y), (x + w, y + h), col, 2)
+        cv2.rectangle(view, (x, y), (x + w, y + h), col, lw)
     return cv2.cvtColor(view, cv2.COLOR_BGR2RGB)
 
 
@@ -246,29 +247,38 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
     kept_ids = {id(d) for d in P.cross_region_nms(flat, iou_thresh=0.5)}
 
     annotated = image_bgr.copy()
+    # ปรับความหนาเส้น/ขนาดฟอนต์ตามขนาดภาพ — ภาพใหญ่ต้องเส้นหนา ตัวใหญ่ ถึงจะเห็นชัด
+    S = max(annotated.shape[:2])
+    lw = max(3, round(S / 400))                 # กรอบตำหนิที่ยืนยัน
+    lw_thin = max(2, lw - 2)                    # กรอบ "อาจมี"
+    fpx = int(min(72, max(22, S / 34)))         # ฟอนต์ป้ายกำกับ
+    C_OK, C_MAYBE, C_REGION = (36, 28, 214), (0, 140, 235), (70, 170, 70)
+
     confirmed, tentative = [], []
     for i, (x, y, w, h) in enumerate(boxes):
         dets = [d for d in region_dets[i] if id(d) in kept_ids]
         is_full = meta["fallback_full_image"] and i == len(boxes) - 1
         tag = "ทั้งภาพ" if is_full else f"#{i + 1}"
-        cv2.rectangle(annotated, (x, y), (x + w, y + h),
-                      (0, 165, 255) if is_full else (0, 255, 0), 2)
+        # วาดกรอบบริเวณเหล็กเฉพาะตอนมีหลายบริเวณจริง — ภาพทั่วไป/fallback ไม่ต้องรก
+        if not is_full and len(boxes) > 1:
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), C_REGION, lw_thin)
 
         ok = [d for d in dets if d["_status"] == "ok"]
         mb = [d for d in dets if d["_status"] == "maybe"]
+        ly = max(y - fpx - 8, 4)
         if ok:
             top = P.DEFECT_INFO[ok[0]["class"]]
             annotated = P.draw_thai_text(
                 annotated, f"{top['name_th']} ({ok[0]['confidence']:.0%})",
-                (x, y - 28), color_bgr=(0, 0, 255))
+                (x, ly), color_bgr=C_OK, font_size=fpx)
         elif mb:
             top = P.DEFECT_INFO[mb[0]["class"]]
             annotated = P.draw_thai_text(
                 annotated, f"อาจเป็น {top['name_th']} ({mb[0]['confidence']:.0%})?",
-                (x, y - 28), color_bgr=(0, 140, 200))
+                (x, ly), color_bgr=C_MAYBE, font_size=fpx)
         elif not any(dd["_status"] == "ok" for reg in region_dets for dd in reg):
             annotated = P.draw_thai_text(annotated, f"เหล็ก {tag} ปกติ",
-                                         (x, y - 28), color_bgr=(0, 150, 0))
+                                         (x, ly), color_bgr=(0, 150, 0), font_size=fpx)
 
         for d in dets:
             gx1, gy1, gx2, gy2 = (int(v) for v in d["bbox_xyxy_global"])
@@ -276,10 +286,11 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
             row = {"tag": tag, "class": d["class"], "name_th": di["name_th"],
                    "conf": d["confidence"], "risk": di["risk"]}
             if d["_status"] == "ok":
-                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), (0, 0, 255), 2)
+                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), (255, 255, 255), lw + 2)
+                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), C_OK, lw)
                 confirmed.append(row)
             else:
-                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), (0, 140, 200), 1)
+                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), C_MAYBE, lw_thin)
                 tentative.append(row)
 
     confirmed.sort(key=lambda r: (_RISK_ORDER.get(r["risk"], 9), -r["conf"]))
@@ -311,7 +322,10 @@ def _globs(d):
 
 _CSS = """
 footer{display:none!important}
-.gradio-container{max-width:1120px!important;margin:0 auto!important}
+.gradio-container{max-width:1200px!important;margin:0 auto!important}
+/* ภาพผลตรวจ — ให้ใหญ่ เห็นตำหนิชัด */
+.result-img{border:1px solid #e0e3e8;border-radius:10px;background:#f4f6f8}
+.result-img img{object-fit:contain!important}
 .hd{padding:6px 2px 14px}
 .hd-title{font-size:22px;font-weight:650;color:#1f2530;letter-spacing:.2px}
 .hd-sub{font-size:13.5px;color:#5b6470;margin-top:5px;line-height:1.5}
@@ -328,9 +342,9 @@ footer{display:none!important}
 .lg{font-size:11.5px;color:#6b7280;display:flex;align-items:center}
 .lg::before{content:"";width:11px;height:11px;border-radius:3px;margin-right:6px;
     border:1px solid rgba(0,0,0,.15)}
-.lg-def::before{background:#c0503f}
-.lg-may::before{background:#fff;border:1px solid #c98c46}
-.lg-metal::before{background:#8fc7a0}
+.lg-def::before{background:#d6362b}
+.lg-may::before{background:#f08a2c}
+.lg-metal::before{background:#fff;border:2px solid #46a046}
 /* ตารางผล */
 table.rt{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
 table.rt th{text-align:left;font-weight:600;color:#6b7280;font-size:11.5px;
@@ -366,9 +380,9 @@ def build_ui():
         )
 
         with gr.Row(equal_height=False):
-            with gr.Column(scale=5, min_width=320):
+            with gr.Column(scale=4, min_width=300):
                 inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ",
-                               height=320, sources=["upload", "clipboard"])
+                               height=300, sources=["upload", "clipboard"])
                 gr.HTML("<div class='hint'>อัปโหลดหรือวางภาพ แล้วระบบตรวจให้อัตโนมัติ</div>")
                 sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
                                 label="โหมดความไว",
@@ -387,21 +401,22 @@ def build_ui():
                         info="ช้าลงราว 2–3 เท่า แลกกับ recall ที่ดีขึ้นเล็กน้อย")
                     btn = gr.Button("ประมวลผลใหม่", variant="secondary", size="sm")
 
-            with gr.Column(scale=7, min_width=360):
+            with gr.Column(scale=6, min_width=340):
                 status = gr.HTML(_empty_banner())
-                out_img = gr.Image(type="numpy", label="ผลตรวจ", height=380,
-                                   interactive=False)
-                gr.HTML("<div class='legend'>"
-                        "<span class='lg lg-def'>กรอบทึบ = ตำหนิที่ยืนยัน</span>"
-                        "<span class='lg lg-may'>กรอบบาง = อาจมี</span>"
-                        "<span class='lg lg-metal'>พื้นเขียว = บริเวณที่เป็นเหล็ก</span>"
-                        "</div>")
-                table = gr.HTML()
-                with gr.Accordion("การทำงานภายใน (Stage 1 + ข้อมูลเทคนิค)", open=False):
-                    out_s1 = gr.Image(type="numpy",
-                                      label="Stage 1 — บริเวณที่เป็นเหล็ก (เขียว) / ตรวจทั้งภาพ (ส้ม)",
-                                      height=280)
-                    info = gr.Markdown()
+
+        out_img = gr.Image(type="numpy", label="ผลตรวจ", height=620,
+                           interactive=False, elem_classes=["result-img"])
+        gr.HTML("<div class='legend'>"
+                "<span class='lg lg-def'>กรอบแดง = ตำหนิที่ยืนยัน</span>"
+                "<span class='lg lg-may'>กรอบส้ม = อาจมี</span>"
+                "<span class='lg lg-metal'>กรอบเขียว = บริเวณที่เป็นเหล็ก (เฉพาะเมื่อมีหลายบริเวณ)</span>"
+                "</div>")
+        table = gr.HTML()
+        with gr.Accordion("การทำงานภายใน (Stage 1 + ข้อมูลเทคนิค)", open=False):
+            out_s1 = gr.Image(type="numpy",
+                              label="Stage 1 — บริเวณที่เป็นเหล็ก (เขียว) / ตรวจทั้งภาพ (ส้ม)",
+                              height=440)
+            info = gr.Markdown()
 
         gr.HTML(
             "<div class='foot'>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + ตรวจทั้งภาพเมื่อไม่พบ) "
