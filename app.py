@@ -13,6 +13,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from ultralytics import YOLO
 
 import pipeline as P
 
@@ -23,7 +24,27 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent
 
-_STATE = {"s1": None, "s2": None, "device": None, "class_conf": None}
+# โมเดล Stage 2 ที่เลือกได้ในหน้าเดโม — key = ป้ายในหน้าจอ, value = (weights, per-class thresholds)
+# "ปรับโดเมน" (train-real1) = train-gray-n2 + 672 ภาพ corrosion จริง (RGB) — ยิงบนภาพถ่ายจริงได้จริง
+# "เล่มจบ" (train-gray-n2) = grayscale, NEU benchmark — ตัวเลขในเล่ม แต่ transfer ต่ำบนภาพถ่ายจริง
+_RUNS = BASE_DIR / "runs" / "detect"
+_STAGE2_MODELS = {
+    "ปรับโดเมน — ภาพถ่ายจริง (แนะนำ)": (_RUNS / "train-real1" / "weights" / "best.pt",
+                                          BASE_DIR / "thresholds_demo.json"),
+    "เล่มจบ — NEU benchmark":          (_RUNS / "train-gray-n2" / "weights" / "best.pt",
+                                          BASE_DIR / "thresholds.json"),
+}
+
+
+def _available_models():
+    """เหลือเฉพาะ key ที่ไฟล์ weights มีจริง — เรียงตามลำดับใน _STAGE2_MODELS"""
+    av = {k: v for k, v in _STAGE2_MODELS.items() if v[0].exists()}
+    if not av and P.STAGE2_MODEL_PATH.exists():   # fallback: default ของ pipeline.py
+        av = {"ค่าเริ่มต้น (pipeline.py)": (P.STAGE2_MODEL_PATH, P.THRESHOLDS_PATH)}
+    return av
+
+
+_STATE = {"s1": None, "device": None, "class_conf": None, "s2_cache": {}, "cc_cache": {}}
 
 # ระดับความเสี่ยง -> ลำดับการแสดงผล (สูงก่อน) + สีชิป
 _RISK_ORDER = {"สูง": 0, "ปานกลาง-สูง": 1, "ปานกลาง": 2, "ต่ำ-ปานกลาง": 3, "ต่ำ": 4}
@@ -42,14 +63,42 @@ _RAW_FLOOR = 0.12       # conf ต่ำสุดที่ให้ YOLO คื�
 _TENTATIVE_FLOOR = 0.30  # ต่ำกว่า threshold แต่ >= ค่านี้ = "อาจมี" (แสดงแยก)
 
 
-def _ensure_models():
+def _load_stage2(weights_path):
+    """โหลด YOLO Stage 2 + ตั้ง flag grayscale จาก train_args ใน checkpoint (เหมือน pipeline.load_models)"""
+    m = YOLO(str(weights_path))
+    try:
+        train_data = str((getattr(m, "ckpt", None) or {})
+                         .get("train_args", {}).get("data", ""))
+    except Exception:
+        train_data = ""
+    m._steel_gray = "gray" in train_data.lower()
+    return m
+
+
+def _ensure_models(model_key=None):
+    """คืน (stage1, stage2, device). stage2 เลือกได้ตาม model_key — cache ไว้ทุกตัวที่เคยโหลด"""
     if _STATE["s1"] is None:
         _STATE["device"] = P.resolve_device("auto")
-        _STATE["s1"], _STATE["s2"] = P.load_models(_STATE["device"])
-        _STATE["class_conf"] = P.load_class_conf()
-        if _STATE["class_conf"]:
-            print("ใช้ per-class conf จาก thresholds.json:", _STATE["class_conf"])
-    return _STATE["s1"], _STATE["s2"], _STATE["device"]
+        print("  Stage 1 (Metal Localization / DMS46)...")
+        import torch
+        s1 = torch.jit.load(str(P.STAGE1_MODEL_PATH), map_location=_STATE["device"])
+        s1.eval()
+        if _STATE["device"] == "cuda":
+            s1 = s1.cuda()
+        _STATE["s1"] = s1
+
+    av = _available_models()
+    if model_key not in av:
+        model_key = next(iter(av))                # default = ตัวแรก (train-real1 ถ้ามี)
+    _STATE["s2_key"] = model_key
+    weights, thr_path = av[model_key]
+    key = str(weights)
+    if key not in _STATE["s2_cache"]:
+        print(f"  Stage 2 ({model_key}): {weights.relative_to(BASE_DIR)}  thr={thr_path.name}")
+        _STATE["s2_cache"][key] = _load_stage2(weights)
+        _STATE["cc_cache"][key] = P.load_class_conf(thr_path) or {}
+    _STATE["class_conf"] = _STATE["cc_cache"][key]
+    return _STATE["s1"], _STATE["s2_cache"][key], _STATE["device"]
 
 
 def _to_bgr(image_rgb):
@@ -141,12 +190,23 @@ def _tentative_html(rows):
             + _rows_table(rows, muted=True) + "</div>")
 
 
-def analyze(image_rgb, conf, detailed, sensitivity, progress=gr.Progress()):
+def analyze(image_rgb, conf, detailed, sensitivity, model_key, progress=gr.Progress()):
+    try:
+        return _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress)
+    except Exception as e:                       # เดโมต้องไม่ค้าง — โชว์ error เป็น banner แทน stack trace
+        import traceback
+        traceback.print_exc()
+        return (None, None,
+                _banner("#fdecea", "#b71c1c", "⚠️ ประมวลผลภาพนี้ไม่สำเร็จ", str(e)),
+                "", "", f"`{type(e).__name__}: {e}`")
+
+
+def _analyze(image_rgb, conf, detailed, sensitivity, model_key, progress):
     if image_rgb is None:
         return None, None, _empty_banner(), "", "", ""
 
     progress(0.1, desc="โหลดโมเดล...")
-    s1, s2, device = _ensure_models()
+    s1, s2, device = _ensure_models(model_key)
     image_bgr = _to_bgr(image_rgb)
 
     scale = _SENS.get(sensitivity, 1.0)
@@ -230,7 +290,8 @@ def analyze(image_rgb, conf, detailed, sensitivity, progress=gr.Progress()):
     tentative.sort(key=lambda r: -r["conf"])
 
     # ----- ข้อมูลเทคนิค -----
-    notes = []
+    notes = [f"โมเดล Stage 2: {_STATE.get('s2_key', model_key)}"
+             + ("  (แปลง crop เป็นขาวดำก่อนตรวจ)" if getattr(s2, "_steel_gray", False) else "")]
     if meta["fallback_full_image"]:
         notes.append("Stage 1 เจอเหล็กน้อย (%.0f%%) จึงตรวจทั้งภาพเป็น fallback" % (metal_ratio * 100))
     if _STATE["class_conf"]:
@@ -247,10 +308,15 @@ def analyze(image_rgb, conf, detailed, sensitivity, progress=gr.Progress()):
             _tentative_html(tentative), info_md)
 
 
+def _globs(d):
+    return [[str(p)] for p in sorted(d.glob("*"))
+            if p.suffix.lower() in P.IMAGE_EXTS] if d.exists() else []
+
+
 def build_ui():
-    sample_dir = BASE_DIR / "test_images"
-    samples = [[str(p)] for p in sorted(sample_dir.glob("*"))
-               if p.suffix.lower() in P.IMAGE_EXTS] if sample_dir.exists() else []
+    lab_samples = _globs(BASE_DIR / "test_images")                 # NEU/Rust crop — โชว์ครบ 8 คลาส
+    real_samples = _globs(BASE_DIR / "real_test" / "images")       # ภาพถ่ายจริงระดับ scene
+    model_choices = list(_available_models())
 
     with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก") as demo:
         gr.Markdown(
@@ -265,16 +331,25 @@ def build_ui():
             with gr.Column(scale=5):
                 inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ",
                                height=340, sources=["upload", "clipboard"])
-                btn = gr.Button("ตรวจสอบอีกครั้ง", variant="primary", size="lg")
+                btn = gr.Button("ตรวจสอบ", variant="primary", size="lg")
                 gr.Markdown("<sub>อัปโหลด/วางภาพ แล้วระบบตรวจให้อัตโนมัติ</sub>")
                 sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
                                 label="โหมดความไว",
                                 info="ภาพถ่ายเองที่โมเดลไม่คุ้น ลองเพิ่มเป็น “ไว/ไวมาก” "
                                      "(เตือนเยอะขึ้น แต่พลาดน้อยลง)")
-                if samples:
-                    gr.Examples(examples=samples, inputs=inp, label="ตัวอย่างภาพ (กดเพื่อตรวจ)",
+                if real_samples:
+                    gr.Examples(examples=real_samples, inputs=inp,
+                                label="ภาพถ่ายจริง (กดเพื่อตรวจ)", examples_per_page=12)
+                if lab_samples:
+                    gr.Examples(examples=lab_samples, inputs=inp,
+                                label="ภาพตัวอย่างจากชุด benchmark — ครบ 8 คลาส (กดเพื่อตรวจ)",
                                 examples_per_page=12)
                 with gr.Accordion("ตัวเลือกขั้นสูง", open=False):
+                    model_sel = gr.Radio(
+                        model_choices, value=model_choices[0] if model_choices else None,
+                        label="โมเดล Stage 2",
+                        info="“ปรับโดเมน” เทรนเพิ่มด้วยภาพถ่ายจริง — ยิงบนภาพถ่ายจริงได้ดีกว่า ; "
+                             "“เล่มจบ” เป็นตัวที่รายงานตัวเลขในเล่ม (grayscale, NEU benchmark)")
                     conf = gr.Slider(0.1, 0.9, value=0.4, step=0.05,
                                      label="Confidence ขั้นต่ำ (คลาสที่ไม่มีใน thresholds.json)")
                     detailed = gr.Checkbox(
@@ -295,16 +370,18 @@ def build_ui():
                     info = gr.Markdown()
 
         gr.Markdown(
-            "<sub>Stage 1: DMS46 หาพื้นที่โลหะ → Stage 2: YOLO11n (เทรนบน grayscale — "
-            "ระบบแปลงภาพเป็นขาวดำก่อนตรวจอัตโนมัติ). โมเดลเทรนจากชุด NEU-DET + Roboflow "
-            "อาจไม่แม่นกับภาพสไตล์อื่น — ใช้โหมดความไวช่วยได้บ้าง</sub>"
+            "<sub>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + fallback ทั้งภาพ) → "
+            "Stage 2: YOLO11n ตรวจตำหนิ 8 ชนิด. โมเดลเทรนจาก NEU-DET + Roboflow (+ ภาพถ่ายจริง "
+            "สำหรับตัว “ปรับโดเมน”). ภาพสไตล์อื่นอาจพลาด — เพิ่มโหมดความไว หรือสลับโมเดลใน "
+            "“ตัวเลือกขั้นสูง” ช่วยได้</sub>"
         )
 
         outputs = [out_img, out_s1, status, table, tentative, info]
-        ins = [inp, conf, detailed, sens]
+        ins = [inp, conf, detailed, sens, model_sel]
         btn.click(analyze, inputs=ins, outputs=outputs)
         inp.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
         sens.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
+        model_sel.change(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
     return demo
 
 
@@ -335,8 +412,14 @@ if __name__ == "__main__":
                           "ให้คนที่ต่อ wifi/สายเดียวกันเข้าได้ด้วย")
     args = ap.parse_args()
 
+    av = _available_models()
+    if not av:
+        sys.exit("ไม่พบไฟล์ weights ของ Stage 2 เลย — เทรนก่อนด้วย train.py / run_round.py")
     print("กำลังเตรียมโมเดล (โหลดครั้งเดียวตอนเริ่ม)...")
-    _ensure_models()
+    for k in av:                     # warm ทุกโมเดลที่เลือกได้ ให้สลับในหน้าเดโมแล้วไม่ต้องรอโหลด
+        _ensure_models(k)
+    _ensure_models(next(iter(av)))   # ให้ default เป็นตัวที่ active ล่าสุด
+    print(f"โมเดล Stage 2 ที่ใช้ได้: {', '.join(av)}  (ค่าเริ่มต้น: {next(iter(av))})\n")
 
     host = "127.0.0.1" if args.local_only else "0.0.0.0"
     print(f"พร้อมใช้งาน — เปิดเองที่ http://127.0.0.1:{args.port}")

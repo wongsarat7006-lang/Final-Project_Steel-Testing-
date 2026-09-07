@@ -1,0 +1,16 @@
+{
+  "_about": "per-class conf สำหรับโมเดล 'ปรับโดเมน' (train-real1, RGB) ที่ใช้ในหน้าเดโม (app.py) เท่านั้น — ไม่เกี่ยวกับเล่มจบ",
+  "_source": "tune_thresholds.py บน merged_dataset (RGB) val สำหรับ train-real1 + rust override 0.12 จาก conf-sweep บน real_test/ (P=0.80 R=0.67 F1=0.73). ตรงกับ config ที่ให้ผล results/real_after_round1.json (rust recall 8/12, micro-F1 0.50)",
+  "_thesis_thresholds": "thresholds.json (grayscale, train-gray-n2) — ใช้กับโมเดล 'เล่มจบ'",
+  "weights": "runs\\detect\\train-real1\\weights\\best.pt",
+  "per_class": {
+    "crazing":         { "conf": 0.263 },
+    "inclusion":       { "conf": 0.396 },
+    "patches":         { "conf": 0.238 },
+    "pitted_surface":  { "conf": 0.357 },
+    "rolled-in_scale": { "conf": 0.219 },
+    "scratches":       { "conf": 0.337 },
+    "rust":            { "conf": 0.12  },
+    "crack":           { "conf": 0.314 }
+  }
+}
