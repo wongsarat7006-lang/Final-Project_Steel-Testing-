@@ -163,7 +163,7 @@ def _empty_banner():
                  "อัปโหลดหรือวางภาพเหล็ก ระบบจะตรวจให้อัตโนมัติ — หรือเลือกจากภาพตัวอย่างด้านล่าง")
 
 
-def _status_html(confirmed, tentative):
+def _status_html(confirmed, tentative, maybe_not_steel=False, gate_p=None):
     if confirmed:
         kinds = sorted({r["name_th"] for r in confirmed})
         risky = sorted({r["name_th"] for r in confirmed if r["risk"] in _HIGH_RISK})
@@ -177,6 +177,14 @@ def _status_html(confirmed, tentative):
         kinds = sorted({r["name_th"] for r in tentative})
         return _card("maybe", "อาจมีตำหนิ (ความมั่นใจต่ำ)",
                      ", ".join(kinds) + "  ต่ำกว่าเกณฑ์ — แนะนำให้ตรวจซ้ำด้วยตา หรือปรับโหมดความไวขึ้น")
+    # ไม่พบตำหนิ — ถ้าตัวจำแนกพื้นผิว + Stage 1 เงียบพร้อมกัน แปะหมายเหตุ (ไม่ฟันธง:
+    # ทั้งคู่ bias ไปภาพแล็บ เหล็กผุ/เหล็กสนิมจริงก็ทำให้เงียบได้เหมือนกัน)
+    if maybe_not_steel:
+        gp = f" ({gate_p:.0%})" if gate_p is not None else ""
+        return _card("ok", "ไม่พบตำหนิพื้นผิว",
+                     f"ระบบไม่พบตำหนิในภาพนี้ · ตัวจำแนกพื้นผิว{gp} และ Stage 1 ประเมินว่า"
+                     " ภาพนี้อาจไม่ใช่พื้นผิวเหล็ก — ถ้าเป็นเหล็กจริง แปลว่าตรวจไม่พบตำหนิ"
+                     " (ภาพสไตล์ที่โมเดลไม่คุ้นอาจพลาดได้)")
     return _card("ok", "ไม่พบตำหนิพื้นผิว",
                  "ระบบไม่พบตำหนิในภาพนี้ (ถ้าเป็นภาพสไตล์ที่โมเดลไม่คุ้น อาจพลาดได้)")
 
@@ -379,17 +387,13 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multisc
     if notes:
         info_md += "\n\n" + "\n".join("- " + n for n in notes)
 
-    # "ไม่พบพื้นผิวเหล็ก" — เชื่อได้เฉพาะตอนทุกสัญญาณเงียบพร้อมกัน:
-    #   ตัวจำแนกพื้นผิว P(เหล็ก) ต่ำมาก  +  DMS46 เจอโลหะ ~0%  +  Stage 2 ไม่เจอตำหนิเลย
-    # (classifier ยัง bias ไปภาพแล็บ จึงไม่ให้มัน veto detection ที่ Stage 2 มั่นใจ)
-    no_steel = (gate_p is not None and gate_p < 0.10
-                and metal_ratio < 0.02 and not confirmed and not tentative)
-    if no_steel:
-        status = _card("neutral", "ไม่พบพื้นผิวเหล็กในภาพนี้",
-                       f"ทั้ง Stage 1, Stage 2 และตัวจำแนกพื้นผิว ({gate_p:.0%}) "
-                       f"เห็นตรงกันว่าภาพนี้ไม่ใช่พื้นผิวเหล็ก")
-    else:
-        status = _status_html(confirmed, tentative)
+    # "อาจไม่ใช่พื้นผิวเหล็ก" — เป็นแค่หมายเหตุ ไม่ใช่คำตัดสิน:
+    #   ตัวจำแนกพื้นผิว + DMS46 ทั้งคู่ bias ไปภาพแล็บ crop ระยะใกล้ → เหล็กสนิม/เหล็กผุ
+    #   ในภาพถ่ายจริงก็ได้ P(เหล็ก)≈0 และ metal_ratio≈0 เหมือนกัน (เจอกับ real_test หลายภาพ)
+    #   เดิมโชว์เป็น headline "ไม่พบพื้นผิวเหล็ก" → ฟันธงผิดกับภาพเหล็กจริงที่ยากที่สุด
+    maybe_not_steel = (gate_p is not None and gate_p < 0.10
+                       and metal_ratio < 0.02 and not confirmed and not tentative)
+    status = _status_html(confirmed, tentative, maybe_not_steel, gate_p)
 
     rows = _rows_data(confirmed, tentative)
     verdict = re.sub(r"<[^>]+>", " ", status)
