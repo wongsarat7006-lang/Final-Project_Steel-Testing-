@@ -1,0 +1,21 @@
+{
+  "note": "train-dr (recipe domainrand) — lab test mAP50 0.777 (ตกจาก ~0.86); real_test image-level R=0.35 P=0.53 (ไม่ดีกว่า train-real2 R=0.39 P=0.64, FP มากขึ้น); scratches 1/1 (ดีขึ้นนิด) แต่ rust 6/12 (ตกจาก 8/12). สรุป: domain randomization ไม่ช่วย เพราะไม่มีข้อมูลจริงให้เรียน",
+  "lab_mAP50": 0.7768,
+  "per_class": {
+    "crazing": 0.812,
+    "inclusion": 0.76,
+    "patches": 0.86,
+    "pitted_surface": 0.768,
+    "rolled-in_scale": 0.626,
+    "scratches": 0.808,
+    "rust": 0.995,
+    "crack": 0.586
+  },
+  "real_test_imagelevel": {
+    "TP": 8,
+    "FP": 7,
+    "FN": 15,
+    "P": 0.53,
+    "R": 0.35
+  }
+}

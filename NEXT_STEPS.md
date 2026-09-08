@@ -47,15 +47,17 @@ perspective/shear, copy_paste 0.3, randaugment, erasing 0.5) + `pipeline.run_sta
 **background training ของ agent โดน OOM kill 3 ครั้ง** (RTX 3050 6GB + เบราว์เซอร์/Claude กิน RAM) —
 `train-dr/best.pt` ตอนนี้ mAP50 แค่ ~0.67 (undertrained ~epoch 20) **อย่าเพิ่งใช้**
 
-รันเองใน PowerShell (ปิดเบราว์เซอร์/โปรแกรมหนักก่อน, อยู่ข้ามคืนได้):
-```powershell
-cd C:\Users\Lenovo\steel-defect-detection
-.\venv\Scripts\python.exe make_oversampled_list.py --dataset merged_dataset
-.\venv\Scripts\python.exe train.py --recipe domainrand --data merged_dataset/data_oversampled.yaml `
-    --model yolo11n.pt --name train-dr --epochs 100 --batch 6 --patience 30 --device 0
-# ถ้า OOM: --batch 4  ;  ตายกลางคัน: เพิ่ม --resume (มี last.pt ทุก epoch)
-```
-เสร็จแล้วส่งกลับให้ agent: `runs/detect/train-dr/weights/best.pt` → จะ tune_thresholds + เสียบ app + วัดผล
+**ผล train-dr (เทรนจบ 2026-09-08) — domain randomization ไม่ช่วย (negative result):**
+- lab test mAP50 **0.777** (ตกจาก ~0.86 ของ train-gray-n2/real1/real2) — aug หนักทำ benchmark ตก ~0.09
+  - rolled-in_scale 0.626, crack 0.586 (อ่อนสุด) ; rust ยัง 0.995
+- real_test image-level: **R 0.35 / P 0.53** — ไม่ดีกว่า train-real2 (R 0.39 / P 0.64) แถม FP มากขึ้น
+  - ดีขึ้นนิดเดียว: scratches 1/1 (real1/2 ได้ 0/1) ; แต่ rust ตก 8/12 → 6/12
+- **สรุป:** ยืนยันว่าไม่มีข้อมูลจริงของ 6 คลาส texture → augmentation ยืดได้แค่สิ่งที่มี ไม่สร้างความรู้ใหม่
+- ใช้เป็น ablation เชิงลบในเล่มได้ (อ้าง Mei/Huber 2025) ; `results/stage2_dr.json`
+- **app.py ยังใช้ train-real1 เป็น default** — ไม่เสียบ train-dr
+
+**ทางที่เหลือจริง ๆ ถ้าจะให้ 6 คลาสใช้ได้บนภาพจริง:** ต้องเก็บ+annotate ภาพถ่ายจริงเอง
+(crazing/inclusion/pitted/rolled-in/scratches บนชิ้นงาน/ฉากจริง) — ไม่มีทางลัด
 
 **Round 3 ถ้าจะทำต่อ:** เทรน train-real2 ให้ครบ 100 epoch (รันใน terminal คุณเอง กัน OOM):
 ```powershell
