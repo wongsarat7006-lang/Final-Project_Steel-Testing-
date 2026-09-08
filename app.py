@@ -269,8 +269,11 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multisc
     scale = _SENS.get(sensitivity, 1.0)
     cc = _STATE["class_conf"] or {}
 
-    def thr(cls):
+    def thr(cls):                       # threshold ที่ลดตามโหมดความไว
         return max(_RAW_FLOOR, cc.get(cls, conf) * scale)
+
+    def thr_tuned(cls):                 # threshold ที่จูนไว้ (เทียบเท่าโหมด "มาตรฐาน")
+        return max(_RAW_FLOOR, cc.get(cls, conf))
 
     # ----- Stage 1 : หาพื้นที่ที่เป็นเหล็ก + fallback -----
     progress(0.35, desc="Stage 1: หาพื้นที่เหล็ก...")
@@ -304,9 +307,13 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multisc
         keep = []
         for d in dets:
             t = thr(d["class"]) * k
-            if d["confidence"] >= t:
+            t_tuned = thr_tuned(d["class"]) * k
+            # ยืนยัน ("ok") เฉพาะที่ผ่าน threshold ที่จูนไว้ — detection ที่ผ่านได้เพราะ
+            # โหมดความไวลด threshold ลง จะแสดงเป็น "อาจมี" เท่านั้น ไม่ขึ้น "ความเสี่ยงสูง"
+            # (กันเคสเช่น ผนังปูน conf 0.19 กลายเป็น "พบตำหนิความเสี่ยงสูง")
+            if d["confidence"] >= t_tuned:
                 d["_status"] = "ok"
-            elif d["confidence"] >= _TENTATIVE_FLOOR * k:
+            elif d["confidence"] >= min(_TENTATIVE_FLOOR * k, t):
                 d["_status"] = "maybe"
             else:
                 continue
