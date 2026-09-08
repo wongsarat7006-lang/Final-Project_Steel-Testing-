@@ -26,7 +26,10 @@ from ultralytics import YOLO
 # ===== Path (อ้างอิงจากตำแหน่งไฟล์นี้ ไม่ผูกกับ working directory) =====
 BASE_DIR = Path(__file__).resolve().parent
 STAGE1_MODEL_PATH = BASE_DIR / "DMS46_v1.pt"
-STAGE2_MODEL_PATH = BASE_DIR / "runs" / "detect" / "train-gray-s" / "weights" / "best.pt"
+STAGE2_MODEL_PATH = BASE_DIR / "runs" / "detect" / "train-gray-n2" / "weights" / "best.pt"
+# เล่มจบใช้ train-gray-n2 (yolo11n, grayscale, NEU/merged benchmark) — test mAP50 0.867 ± 0.010 (n=4)
+# ราง product/future-work: train-real1 (= config เดียวกัน + 672 ภาพ corrosion จริง, RGB, --recipe camera)
+#   กู้ rust recall บนภาพถ่ายจริง 0/12 -> 8/12 — เรียกใช้แบบ opt-in: pipeline.py --weights runs/detect/train-real1/weights/best.pt
 THRESHOLDS_PATH = BASE_DIR / "thresholds.json"  # per-class conf (ถ้ามี) — สร้างด้วย tune_thresholds.py
 
 # DMS46 ทำนายเป็น index 0-45 (เรียงจาก taxonomy 46 ชนิดที่โมเดลรองรับ)
@@ -268,20 +271,22 @@ def load_class_conf(path=None):
 
 
 def run_stage2(stage2_model, crop_image, conf: float, device: str, augment: bool = False,
-               class_conf: dict | None = None):
+               class_conf: dict | None = None, imgsz: int | None = None):
     """รัน YOLO ตรวจตำหนิบน crop, คืน list ของ detection เรียงตาม confidence มาก->น้อย
     (bbox เป็นพิกัดของ crop — ผู้เรียกต้องบวก offset ของ region เองถ้าจะเทียบข้ามบริเวณ)
     augment=True    : test-time augmentation ของ ultralytics (ช้าลง ~2-3x, recall ดีขึ้นเล็กน้อย)
-    class_conf={..} : กรอง detection ด้วย threshold รายคลาส (predict ที่ค่าต่ำสุดก่อน แล้วค่อยกรอง)"""
+    class_conf={..} : กรอง detection ด้วย threshold รายคลาส (predict ที่ค่าต่ำสุดก่อน แล้วค่อยกรอง)
+    imgsz          : บังคับขนาด inference (สำหรับ multi-scale) — None = ให้ ultralytics เลือกเอง"""
     if crop_image.size == 0 or crop_image.shape[0] < 8 or crop_image.shape[1] < 8:
         return []
     if getattr(stage2_model, "_steel_gray", False):
         g = cv2.cvtColor(crop_image, cv2.COLOR_BGR2GRAY)
         crop_image = cv2.cvtColor(g, cv2.COLOR_GRAY2BGR)
     base_conf = min([conf, *class_conf.values()]) if class_conf else conf
-    results = stage2_model.predict(
-        source=crop_image, conf=base_conf, device=device, augment=augment, verbose=False
-    )
+    kw = dict(source=crop_image, conf=base_conf, device=device, augment=augment, verbose=False)
+    if imgsz:
+        kw["imgsz"] = int(imgsz)
+    results = stage2_model.predict(**kw)
     detections = []
     for r in results:
         for box in r.boxes:
@@ -298,6 +303,57 @@ def run_stage2(stage2_model, crop_image, conf: float, device: str, augment: bool
             })
     detections.sort(key=lambda d: d["confidence"], reverse=True)
     return detections
+
+
+def _make_tiles(w, h, tile=1024, overlap=0.25):
+    """แบ่งภาพเป็นไทล์สี่เหลี่ยมซ้อนกัน — คืน [(x, y, tw, th), ...]"""
+    step = int(tile * (1 - overlap))
+    xs = list(range(0, max(1, w - tile + 1), step)) or [0]
+    ys = list(range(0, max(1, h - tile + 1), step)) or [0]
+    if xs[-1] + tile < w:
+        xs.append(w - tile)
+    if ys[-1] + tile < h:
+        ys.append(h - tile)
+    out = []
+    for y in ys:
+        for x in xs:
+            x0, y0 = max(0, x), max(0, y)
+            out.append((x0, y0, min(tile, w - x0), min(tile, h - y0)))
+    return out
+
+
+def run_stage2_multiscale(stage2_model, crop_image, conf, device, class_conf=None,
+                          scales=(640, 960, 1280), tile_when_longside=1500):
+    """ตรวจ Stage 2 หลายสเกล + ตัดไทล์ถ้าภาพใหญ่ แล้วรวมด้วย class-aware NMS
+    ช้ากว่า run_stage2 ~3-6 เท่า แต่จับตำหนิบนภาพถ่ายจริงขนาดใหญ่/สเกลต่างได้ดีกว่า
+    คืน detection รูปแบบเดียวกับ run_stage2 (พิกัดอิงกับ crop_image)"""
+    if crop_image is None or crop_image.size == 0:
+        return []
+    H, W = crop_image.shape[:2]
+    acc = []
+    for s in scales:
+        acc += run_stage2(stage2_model, crop_image, conf, device,
+                          class_conf=class_conf, imgsz=s)
+    if max(H, W) >= tile_when_longside:
+        for (tx, ty, tw, th) in _make_tiles(W, H, tile=1024, overlap=0.25):
+            sub = crop_image[ty:ty + th, tx:tx + tw]
+            for d in run_stage2(stage2_model, sub, conf, device,
+                                class_conf=class_conf, imgsz=768):
+                x1, y1, x2, y2 = d["bbox_xyxy_crop"]
+                d["bbox_xyxy_crop"] = [x1 + tx, y1 + ty, x2 + tx, y2 + ty]
+                cx, cy, bw, bh = d["bbox_xywh"]
+                d["bbox_xywh"] = [cx + tx, cy + ty, bw, bh]
+                acc.append(d)
+    # class-aware NMS บนพิกัด crop
+    order = sorted(acc, key=lambda d: d["confidence"], reverse=True)
+    kept = []
+    for d in order:
+        if any(d["class"] == k["class"]
+               and _iou_xyxy(d["bbox_xyxy_crop"], k["bbox_xyxy_crop"]) > 0.55
+               for k in kept):
+            continue
+        kept.append(d)
+    return kept
 
 
 def _iou_xyxy(a, b):

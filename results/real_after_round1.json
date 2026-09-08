@@ -1,0 +1,182 @@
+{
+  "device": "cuda",
+  "conf": 0.4,
+  "n_images": 18,
+  "weights": "runs\\detect\\train-real1\\weights\\best.pt",
+  "thresholds": "thresholds_demo.json",
+  "per_class_conf": {
+    "crazing": 0.263,
+    "inclusion": 0.396,
+    "patches": 0.238,
+    "pitted_surface": 0.357,
+    "rolled-in_scale": 0.219,
+    "scratches": 0.337,
+    "rust": 0.12,
+    "crack": 0.314
+  },
+  "pipeline": {
+    "micro_precision": 0.6923,
+    "micro_recall": 0.3913,
+    "micro_f1": 0.5,
+    "macro_f1": 0.2191,
+    "per_class": [
+      {
+        "class": "crazing",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "inclusion",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "patches",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "pitted_surface",
+        "tp": 0,
+        "fp": 0,
+        "fn": 6,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "rolled-in_scale",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "scratches",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "rust",
+        "tp": 8,
+        "fp": 3,
+        "fn": 4,
+        "precision": 0.7273,
+        "recall": 0.6667,
+        "f1": 0.6957
+      },
+      {
+        "class": "crack",
+        "tp": 1,
+        "fp": 1,
+        "fn": 2,
+        "precision": 0.5,
+        "recall": 0.3333,
+        "f1": 0.4
+      }
+    ],
+    "stage1_metal_found_rate": 0.5556,
+    "fallback_full_image_rate": 0.7222,
+    "avg_regions_per_image": 1.72,
+    "sec_per_image": 0.366
+  },
+  "baseline": {
+    "micro_precision": 0.75,
+    "micro_recall": 0.3913,
+    "micro_f1": 0.5143,
+    "macro_f1": 0.2255,
+    "per_class": [
+      {
+        "class": "crazing",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "inclusion",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "patches",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "pitted_surface",
+        "tp": 0,
+        "fp": 0,
+        "fn": 6,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "rolled-in_scale",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "scratches",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "rust",
+        "tp": 8,
+        "fp": 2,
+        "fn": 4,
+        "precision": 0.8,
+        "recall": 0.6667,
+        "f1": 0.7273
+      },
+      {
+        "class": "crack",
+        "tp": 1,
+        "fp": 1,
+        "fn": 2,
+        "precision": 0.5,
+        "recall": 0.3333,
+        "f1": 0.4
+      }
+    ],
+    "sec_per_image": 0.03
+  }
+}

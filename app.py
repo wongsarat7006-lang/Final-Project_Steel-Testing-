@@ -1,19 +1,32 @@
 """
-Prototype UI: อัปโหลดภาพเหล็ก -> ระบบตรวจ 2 ขั้นตอน -> แสดงกรอบเหล็ก + ตารางตำหนิ
+Prototype UI (Gradio): อัปโหลด / วางภาพ / ถ่ายจากกล้อง -> ระบบตรวจ 2 ขั้นตอน
+-> การ์ดสรุปผล + ตารางรายการตำหนิ + ภาพผลลัพธ์ + ภาพ Stage 1
 
 รัน:
-    python app.py
-เปิดเบราว์เซอร์ที่ http://127.0.0.1:7860
+    python app.py                 # เปิดที่ http://127.0.0.1:7860 (และวง LAN เดียวกัน)
+    python app.py --share         # เพิ่มลิงก์สาธารณะ *.gradio.live
+    python app.py --local-only    # เปิดเฉพาะเครื่องนี้
 
 ต้องมี gradio:  pip install gradio
+หมายเหตุ: การถ่ายจากกล้องในเบราว์เซอร์ต้องเปิดผ่าน https หรือ localhost (127.0.0.1)
 """
+import csv
+import json
+import re
 import sys
+import tempfile
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import cv2
 import numpy as np
+from ultralytics import YOLO
 
 import pipeline as P
+import steel_gate
+
+LOG_DIR = Path(__file__).resolve().parent / "demo_logs"
 
 try:
     import gradio as gr
@@ -22,20 +35,86 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent
 
-_STATE = {"s1": None, "s2": None, "device": None, "class_conf": None}
+# โมเดล Stage 2 ที่เลือกได้ในหน้าเดโม — key = ป้ายในหน้าจอ, value = (weights, per-class thresholds)
+# "ปรับโดเมน" (train-real1) = train-gray-n2 config + 672 ภาพ corrosion จริง (round1) — สมดุลสุด
+#   สนิม lab-crop ยังตรวจได้ (conf ~0.42) + ยิงบนภาพถ่ายจริงได้ 8/12
+# "รุ่นทดลอง scene" (train-real2) = + 1022 ภาพสนิม scene จริง (round2) — conf บนสนิม scene สูงขึ้น
+#   แต่ REGRESS บนสนิม lab-crop (rust_example: 0.42 -> 0.04) เพราะ fine-tune แรง + เทรนไม่จบ
+# "เล่มจบ" (train-gray-n2) = grayscale, NEU benchmark — ตัวเลขในเล่ม แต่ transfer ต่ำบนภาพถ่ายจริง
+_RUNS = BASE_DIR / "runs" / "detect"
+_STAGE2_MODELS = {
+    "ปรับโดเมน — ภาพถ่ายจริง (แนะนำ)": (_RUNS / "train-real1" / "weights" / "best.pt",
+                                          BASE_DIR / "thresholds_demo.json"),
+    "รุ่นทดลอง — เน้นภาพ scene (round 2)": (_RUNS / "train-real2" / "weights" / "best.pt",
+                                              BASE_DIR / "thresholds_real2.json"),
+    "เล่มจบ — NEU benchmark":          (_RUNS / "train-gray-n2" / "weights" / "best.pt",
+                                          BASE_DIR / "thresholds.json"),
+}
 
-# ระดับความเสี่ยง -> ลำดับการแสดงผล (สูงก่อน) + สี badge
+
+def _available_models():
+    """เหลือเฉพาะ key ที่ไฟล์ weights มีจริง — เรียงตามลำดับใน _STAGE2_MODELS"""
+    av = {k: v for k, v in _STAGE2_MODELS.items() if v[0].exists()}
+    if not av and P.STAGE2_MODEL_PATH.exists():   # fallback: default ของ pipeline.py
+        av = {"ค่าเริ่มต้น (pipeline.py)": (P.STAGE2_MODEL_PATH, P.THRESHOLDS_PATH)}
+    return av
+
+
+_STATE = {"s1": None, "device": None, "class_conf": None, "s2_cache": {}, "cc_cache": {}}
+
+# ระดับความเสี่ยง -> ลำดับการแสดงผล (สูงก่อน) + สีชิป (โทนอ่อน อ่านสบายตา)
 _RISK_ORDER = {"สูง": 0, "ปานกลาง-สูง": 1, "ปานกลาง": 2, "ต่ำ-ปานกลาง": 3, "ต่ำ": 4}
+_RISK_COLOR = {
+    "สูง": ("#fef2f2", "#dc2626"),
+    "ปานกลาง-สูง": ("#fff7ed", "#ea580c"),
+    "ปานกลาง": ("#fefce8", "#a16207"),
+    "ต่ำ-ปานกลาง": ("#eff6ff", "#2563eb"),
+    "ต่ำ": ("#f1f5f9", "#475569"),
+}
+_HIGH_RISK = ("สูง", "ปานกลาง-สูง")
+
+# โหมดความไว -> ตัวคูณ threshold รายคลาส (ยิ่งต่ำ = ยิ่งเตือนเยอะ)
+_SENS = {"มาตรฐาน": 1.0, "ไว": 0.6, "ไวมาก": 0.4}
+_RAW_FLOOR = 0.12       # conf ต่ำสุดที่ให้ YOLO คืนมา
+_TENTATIVE_FLOOR = 0.30  # ต่ำกว่า threshold แต่ >= ค่านี้ = "อาจมี" (แสดงแยก)
 
 
-def _ensure_models():
+def _load_stage2(weights_path):
+    """โหลด YOLO Stage 2 + ตั้ง flag grayscale จาก train_args ใน checkpoint (เหมือน pipeline.load_models)"""
+    m = YOLO(str(weights_path))
+    try:
+        train_data = str((getattr(m, "ckpt", None) or {})
+                         .get("train_args", {}).get("data", ""))
+    except Exception:
+        train_data = ""
+    m._steel_gray = "gray" in train_data.lower()
+    return m
+
+
+def _ensure_models(model_key=None):
+    """คืน (stage1, stage2, device). stage2 เลือกได้ตาม model_key — cache ไว้ทุกตัวที่เคยโหลด"""
     if _STATE["s1"] is None:
         _STATE["device"] = P.resolve_device("auto")
-        _STATE["s1"], _STATE["s2"] = P.load_models(_STATE["device"])
-        _STATE["class_conf"] = P.load_class_conf()
-        if _STATE["class_conf"]:
-            print("ใช้ per-class conf จาก thresholds.json:", _STATE["class_conf"])
-    return _STATE["s1"], _STATE["s2"], _STATE["device"]
+        print("  Stage 1 (Metal Localization / DMS46)...")
+        import torch
+        s1 = torch.jit.load(str(P.STAGE1_MODEL_PATH), map_location=_STATE["device"])
+        s1.eval()
+        if _STATE["device"] == "cuda":
+            s1 = s1.cuda()
+        _STATE["s1"] = s1
+
+    av = _available_models()
+    if model_key not in av:
+        model_key = next(iter(av))                # default = ตัวแรก (train-real1 ถ้ามี)
+    _STATE["s2_key"] = model_key
+    weights, thr_path = av[model_key]
+    key = str(weights)
+    if key not in _STATE["s2_cache"]:
+        print(f"  Stage 2 ({model_key}): {weights.relative_to(BASE_DIR)}  thr={thr_path.name}")
+        _STATE["s2_cache"][key] = _load_stage2(weights)
+        _STATE["cc_cache"][key] = P.load_class_conf(thr_path) or {}
+    _STATE["class_conf"] = _STATE["cc_cache"][key]
+    return _STATE["s1"], _STATE["s2_cache"][key], _STATE["device"]
 
 
 def _to_bgr(image_rgb):
@@ -55,23 +134,148 @@ def _stage1_view(image_bgr, mask, boxes, meta):
     green[:, :] = (0, 200, 0)
     m = mask.astype(bool)
     view[m] = cv2.addWeighted(view, 0.55, green, 0.45, 0)[m]
-    n_real = meta["n_regions"] - (1 if meta["fallback_full_image"] else 0)
+    lw = max(2, round(max(view.shape[:2]) / 400))
     for i, (x, y, w, h) in enumerate(boxes):
         is_full = meta["fallback_full_image"] and i == len(boxes) - 1
         col = (0, 165, 255) if is_full else (0, 255, 0)  # ส้ม = fallback ทั้งภาพ
-        cv2.rectangle(view, (x, y), (x + w, y + h), col, 2)
+        cv2.rectangle(view, (x, y), (x + w, y + h), col, lw)
     return cv2.cvtColor(view, cv2.COLOR_BGR2RGB)
 
 
-def analyze(image_rgb, conf, detailed, progress=gr.Progress()):
-    if image_rgb is None:
-        return None, None, "### อัปโหลดภาพก่อน", []
+# ---------- HTML rendering ----------
+# state -> สีเส้นขอบซ้ายของการ์ดสรุปผล (โทนเดียวกับ _RISK_COLOR — เรียบ ไม่มีพื้นสีจัด)
+_STATE_ACCENT = {
+    "danger": "#ef4444", "warn": "#f59e0b", "maybe": "#94a3b8",
+    "ok": "#22c55e", "neutral": "#cbd5e1",
+}
 
-    progress(0.1, desc="โหลดโมเดล...")
-    s1, s2, device = _ensure_models()
+
+def _card(state, title, sub=""):
+    accent = _STATE_ACCENT.get(state, _STATE_ACCENT["neutral"])
+    sub_html = f"<div class='rc-sub'>{sub}</div>" if sub else ""
+    return (f"<div class='rc' style='border-left-color:{accent}'>"
+            f"<div class='rc-kicker'>ผลการตรวจ</div>"
+            f"<div class='rc-title'>{title}</div>{sub_html}</div>")
+
+
+def _empty_banner():
+    return _card("neutral", "ยังไม่มีผล",
+                 "อัปโหลดหรือวางภาพเหล็ก ระบบจะตรวจให้อัตโนมัติ — หรือเลือกจากภาพตัวอย่างด้านล่าง")
+
+
+def _status_html(confirmed, tentative, maybe_not_steel=False, gate_p=None):
+    if confirmed:
+        kinds = sorted({r["name_th"] for r in confirmed})
+        risky = sorted({r["name_th"] for r in confirmed if r["risk"] in _HIGH_RISK})
+        extra = f" · อาจมีเพิ่มอีก {len(tentative)} จุด" if tentative else ""
+        if risky:
+            return _card("danger", "พบตำหนิความเสี่ยงสูง",
+                         ", ".join(risky) + f"  (รวมทั้งหมด {len(kinds)} ชนิด){extra}")
+        return _card("warn", f"พบตำหนิ {len(kinds)} ชนิด",
+                     ", ".join(kinds) + "  ไม่มีชนิดที่จัดเป็นความเสี่ยงสูง" + extra)
+    if tentative:
+        kinds = sorted({r["name_th"] for r in tentative})
+        return _card("maybe", "อาจมีตำหนิ (ความมั่นใจต่ำ)",
+                     ", ".join(kinds) + "  ต่ำกว่าเกณฑ์ — แนะนำให้ตรวจซ้ำด้วยตา หรือปรับโหมดความไวขึ้น")
+    # ไม่พบตำหนิ — ถ้าตัวจำแนกพื้นผิว + Stage 1 เงียบพร้อมกัน แปะหมายเหตุ (ไม่ฟันธง:
+    # ทั้งคู่ bias ไปภาพแล็บ เหล็กผุ/เหล็กสนิมจริงก็ทำให้เงียบได้เหมือนกัน)
+    if maybe_not_steel:
+        gp = f" ({gate_p:.0%})" if gate_p is not None else ""
+        return _card("ok", "ไม่พบตำหนิพื้นผิว",
+                     f"ระบบไม่พบตำหนิในภาพนี้ · ตัวจำแนกพื้นผิว{gp} และ Stage 1 ประเมินว่า"
+                     " ภาพนี้อาจไม่ใช่พื้นผิวเหล็ก — ถ้าเป็นเหล็กจริง แปลว่าตรวจไม่พบตำหนิ"
+                     " (ภาพสไตล์ที่โมเดลไม่คุ้นอาจพลาดได้)")
+    return _card("ok", "ไม่พบตำหนิพื้นผิว",
+                 "ระบบไม่พบตำหนิในภาพนี้ (ถ้าเป็นภาพสไตล์ที่โมเดลไม่คุ้น อาจพลาดได้)")
+
+
+TABLE_HEADERS = ["บริเวณ", "ชนิดตำหนิ", "คลาส", "ความมั่นใจ", "ความเสี่ยง"]
+
+
+def _rows_data(confirmed, tentative):
+    """คืนข้อมูลตารางเป็น list-of-rows สำหรับ gr.Dataframe (ยืนยันก่อน แล้วตามด้วย 'อาจมี')"""
+    out = []
+    for r in confirmed:
+        out.append([r["tag"], r["name_th"], r["class"], f"{r['conf']:.0%}", r["risk"]])
+    for r in tentative:
+        out.append([r["tag"], r["name_th"], r["class"],
+                    f"{r['conf']:.0%} (อาจมี)", r["risk"]])
+    return out
+
+
+def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multiscale=False,
+            progress=gr.Progress()):
+    try:
+        return _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on,
+                        multiscale, progress)
+    except Exception as e:                       # เดโมต้องไม่ค้าง — โชว์ error เป็นการ์ดแทน stack trace
+        import traceback
+        traceback.print_exc()
+        return (None, None,
+                _card("danger", "ประมวลผลภาพนี้ไม่สำเร็จ", str(e)),
+                [], f"`{type(e).__name__}: {e}`", {})
+
+
+_C_OK, _C_MAYBE = (68, 68, 239), (11, 158, 245)   # BGR ~ #ef4444 / #f59e0b
+
+
+def analyze_stream(frame_rgb, model_key, sensitivity):
+    """โหมดเรียลไทม์ (ทดลอง): รัน Stage 2 บนเฟรมเต็ม ไม่ผ่าน Stage 1 — เร็วพอสำหรับดูสด
+    คืน (ภาพพร้อมกรอบ, ข้อความสรุปสั้น)"""
+    if frame_rgb is None:
+        return None, ""
+    try:
+        bgr = _to_bgr(frame_rgb)
+        _, s2, device = _ensure_models(model_key)
+        scale = _SENS.get(sensitivity, 1.0)
+        cc = _STATE["class_conf"] or {}
+        dets = P.run_stage2(s2, bgr, _RAW_FLOOR, device, augment=False, class_conf=None)
+        S = max(bgr.shape[:2])
+        lw = max(2, round(S / 380))
+        fpx = int(min(48, max(16, S / 40)))
+        found = {}
+        for d in dets:
+            t = max(_RAW_FLOOR, cc.get(d["class"], 0.4) * scale)
+            if d["confidence"] < t:
+                continue
+            x1, y1, x2, y2 = (int(v) for v in d["bbox_xyxy_crop"])
+            cv2.rectangle(bgr, (x1, y1), (x2, y2), (255, 255, 255), lw + 2)
+            cv2.rectangle(bgr, (x1, y1), (x2, y2), _C_OK, lw)
+            di = P.DEFECT_INFO[d["class"]]
+            ly = y1 - fpx - 6 if y1 - fpx - 6 >= 2 else y1 + 4
+            bgr = P.draw_thai_text(bgr, f"{di['name_th']} {d['confidence']:.0%}",
+                                   (max(x1, 3), ly), color_bgr=_C_OK, font_size=fpx)
+            found[di["name_th"]] = max(found.get(di["name_th"], 0), d["confidence"])
+        txt = ("พบ: " + ", ".join(f"{k} {v:.0%}" for k, v in
+               sorted(found.items(), key=lambda kv: -kv[1]))) if found else "ยังไม่พบตำหนิ"
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), txt
+    except Exception as e:
+        return frame_rgb, f"(ประมวลผลเฟรมไม่สำเร็จ: {e})"
+
+
+def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multiscale, progress):
+    if image_rgb is None:
+        return None, None, _empty_banner(), [], "", {}
+
     image_bgr = _to_bgr(image_rgb)
 
-    # ----- Stage 1 : หาพื้นที่ที่เป็นเหล็ก + fallback (เหมือน pipeline.py) -----
+    # Stage 0: P(พื้นผิวเหล็ก) — ใช้เป็น "เสียงโหวตเดียว" ตอนสรุปผล ไม่บล็อกเดี่ยว ๆ
+    # (classifier ยัง overfit ไป lab crop — real steel photo ได้ P ต่ำ จึงไม่ยอมให้มัน veto)
+    gate_p = steel_gate.steel_prob(image_bgr) if gate_on else None
+
+    progress(0.1, desc="โหลดโมเดล...")
+    s1, s2, device = _ensure_models(model_key)
+
+    scale = _SENS.get(sensitivity, 1.0)
+    cc = _STATE["class_conf"] or {}
+
+    def thr(cls):                       # threshold ที่ลดตามโหมดความไว
+        return max(_RAW_FLOOR, cc.get(cls, conf) * scale)
+
+    def thr_tuned(cls):                 # threshold ที่จูนไว้ (เทียบเท่าโหมด "มาตรฐาน")
+        return max(_RAW_FLOOR, cc.get(cls, conf))
+
+    # ----- Stage 1 : หาพื้นที่ที่เป็นเหล็ก + fallback -----
     progress(0.35, desc="Stage 1: หาพื้นที่เหล็ก...")
     mask = P.run_stage1(s1, image_bgr, device)
     boxes, meta = P.build_regions(mask, image_bgr.shape)
@@ -79,110 +283,407 @@ def analyze(image_rgb, conf, detailed, progress=gr.Progress()):
     n_metal = meta["n_regions"] - (1 if meta["fallback_full_image"] else 0)
     stage1_img = _stage1_view(image_bgr, mask, boxes, meta)
 
-    # ----- Stage 2 : ตรวจตำหนิทุกบริเวณ + แปลง bbox เป็นพิกัดภาพเต็ม -----
-    progress(0.55, desc="Stage 2: ตรวจตำหนิ...")
+    # ภาพ scene/มุมกว้าง: Stage 1 มักแตกเหล็กเป็นหลายชิ้นเล็ก ๆ ทำให้ Stage 2 เสียบริบท
+    # -> ถ้าแตกเป็นหลายบริเวณจริง (>=3) เพิ่ม "ตรวจทั้งภาพ" อีก 1 รอบ แล้วให้ NMS รวมผลเอง
+    #    (detection จากรอบทั้งภาพจะถูกกรองด้วย threshold ที่เข้มกว่า เพราะภาพถูกย่อมาก)
+    H, W = image_bgr.shape[:2]
+    full_box = (0, 0, W, H)
+    add_full = (not meta["fallback_full_image"] and len(boxes) >= 3 and full_box not in boxes)
+    if add_full:
+        boxes = list(boxes) + [full_box]
+
+    # ----- Stage 2 : ตรวจตำหนิ (คืนที่ conf ต่ำ แล้วมาแยกเองเป็น confirmed / tentative) -----
+    progress(0.55, desc=("Stage 2: ตรวจหลายสเกล..." if multiscale else "Stage 2: ตรวจตำหนิ..."))
     region_dets = []
     for x, y, w, h in boxes:
+        is_full_pass = (x, y, w, h) == full_box and add_full
+        k = 1.6 if is_full_pass else 1.0        # รอบ "ทั้งภาพ" ภาพถูกย่อมาก -> ต้องมั่นใจกว่าถึงจะนับ
         crop = image_bgr[y:y + h, x:x + w]
-        dets = P.run_stage2(s2, crop, conf, device, augment=bool(detailed),
-                            class_conf=_STATE["class_conf"])
+        if multiscale:
+            dets = P.run_stage2_multiscale(s2, crop, _RAW_FLOOR, device, class_conf=None)
+        else:
+            dets = P.run_stage2(s2, crop, _RAW_FLOOR, device, augment=bool(detailed),
+                                class_conf=None)
+        keep = []
         for d in dets:
+            t = thr(d["class"]) * k
+            t_tuned = thr_tuned(d["class"]) * k
+            # ยืนยัน ("ok") เฉพาะที่ผ่าน threshold ที่จูนไว้ — detection ที่ผ่านได้เพราะ
+            # โหมดความไวลด threshold ลง จะแสดงเป็น "อาจมี" เท่านั้น ไม่ขึ้น "ความเสี่ยงสูง"
+            # (กันเคสเช่น ผนังปูน conf 0.19 กลายเป็น "พบตำหนิความเสี่ยงสูง")
+            if d["confidence"] >= t_tuned:
+                d["_status"] = "ok"
+            elif d["confidence"] >= min(_TENTATIVE_FLOOR * k, t):
+                d["_status"] = "maybe"
+            else:
+                continue
             cx1, cy1, cx2, cy2 = d["bbox_xyxy_crop"]
             d["bbox_xyxy_global"] = [cx1 + x, cy1 + y, cx2 + x, cy2 + y]
-        region_dets.append(dets)
+            keep.append(d)
+        region_dets.append(keep)
 
-    # ----- Cross-region NMS: ตัด detection ซ้ำจากกรอบทับกัน / fallback ทั้งภาพ -----
+    # ----- Cross-region NMS (รวม confirmed + tentative) -----
     progress(0.8, desc="รวมผล...")
     flat = [d for dets in region_dets for d in dets]
     kept_ids = {id(d) for d in P.cross_region_nms(flat, iou_thresh=0.5)}
 
     annotated = image_bgr.copy()
-    rows = []
+    # ปรับความหนาเส้น/ขนาดฟอนต์ตามขนาดภาพ — ภาพใหญ่ต้องเส้นหนา ตัวใหญ่ ถึงจะเห็นชัด
+    S = max(annotated.shape[:2])
+    lw = max(3, round(S / 400))                 # กรอบตำหนิที่ยืนยัน
+    lw_thin = max(2, lw - 2)                    # กรอบ "อาจมี"
+    fpx = int(min(72, max(22, S / 34)))         # ฟอนต์ป้ายกำกับ
+    C_OK, C_MAYBE, C_REGION = (68, 68, 239), (11, 158, 245), (94, 197, 34)  # BGR ~ #ef4444 / #f59e0b / #22c55e
+
+    confirmed, tentative = [], []
     for i, (x, y, w, h) in enumerate(boxes):
-        detections = [d for d in region_dets[i] if id(d) in kept_ids]
-        is_full = meta["fallback_full_image"] and i == len(boxes) - 1
+        dets = [d for d in region_dets[i] if id(d) in kept_ids]
+        is_full = (x, y, w, h) == full_box
         tag = "ทั้งภาพ" if is_full else f"#{i + 1}"
-        box_col = (0, 165, 255) if is_full else (0, 255, 0)
-        cv2.rectangle(annotated, (x, y), (x + w, y + h), box_col, 2)
+        # กรอบบริเวณเหล็ก (เขียว) แสดงเฉพาะในภาพ Stage 1 เท่านั้น — ภาพผลลัพธ์ให้เห็นแค่กรอบตำหนิ
 
-        if detections:
-            top = detections[0]
-            info = P.DEFECT_INFO[top["class"]]
+        ok = [d for d in dets if d["_status"] == "ok"]
+        mb = [d for d in dets if d["_status"] == "maybe"]
+        # ป้ายกำกับ: ปกติวางเหนือกรอบ แต่ถ้าไม่มีที่ (กรอบชิดขอบบน / เต็มภาพ) ให้วางในกรอบ เยื้องเข้ามาเล็กน้อย
+        lx = min(max(x + 4, 4), annotated.shape[1] - 6)
+        ly = y - fpx - 10 if y - fpx - 10 >= 2 else y + 6
+        if ok:
+            top = P.DEFECT_INFO[ok[0]["class"]]
             annotated = P.draw_thai_text(
-                annotated, f"{info['name_th']} ({top['confidence']:.0%})",
-                (x, y - 28), color_bgr=(0, 0, 255),
-            )
-            for d in detections:
-                gx1, gy1, gx2, gy2 = (int(v) for v in d["bbox_xyxy_global"])
-                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), (0, 0, 255), 2)
-                di = P.DEFECT_INFO[d["class"]]
-                rows.append([tag, d["class"], di["name_th"],
-                             f"{d['confidence']:.1%}", di["risk"]])
-        else:
-            annotated = P.draw_thai_text(annotated, f"เหล็ก {tag} ปกติ",
-                                         (x, y - 28), color_bgr=(0, 150, 0))
+                annotated, f"{top['name_th']} ({ok[0]['confidence']:.0%})",
+                (lx, ly), color_bgr=C_OK, font_size=fpx)
+        elif mb:
+            top = P.DEFECT_INFO[mb[0]["class"]]
+            annotated = P.draw_thai_text(
+                annotated, f"อาจเป็น {top['name_th']} ({mb[0]['confidence']:.0%})?",
+                (lx, ly), color_bgr=C_MAYBE, font_size=fpx)
 
-    rows.sort(key=lambda r: (_RISK_ORDER.get(r[4], 9), -float(r[3].rstrip("%"))))
+        for d in dets:
+            gx1, gy1, gx2, gy2 = (int(v) for v in d["bbox_xyxy_global"])
+            di = P.DEFECT_INFO[d["class"]]
+            row = {"tag": tag, "class": d["class"], "name_th": di["name_th"],
+                   "conf": d["confidence"], "risk": di["risk"]}
+            if d["_status"] == "ok":
+                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), (255, 255, 255), lw + 2)
+                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), C_OK, lw)
+                confirmed.append(row)
+            else:
+                cv2.rectangle(annotated, (gx1, gy1), (gx2, gy2), C_MAYBE, lw_thin)
+                tentative.append(row)
 
-    # ----- สรุปผล (headline) -----
-    if not rows:
-        verdict = "## ✅ ไม่พบตำหนิ\nระบบไม่พบตำหนิพื้นผิวในภาพนี้ (ที่ค่าความมั่นใจ ≥ %.2f)" % conf
-    else:
-        risky = sorted({r[2] for r in rows if r[4] in ("สูง", "ปานกลาง-สูง")},
-                       key=lambda n: n)
-        kinds = sorted({r[2] for r in rows})
-        head = "## ⚠️ พบตำหนิ %d ชนิด: %s" % (len(kinds), ", ".join(kinds))
-        if risky:
-            head += "\n### 🔴 ความเสี่ยงสูง: %s" % ", ".join(risky)
-        verdict = head
+    confirmed.sort(key=lambda r: (_RISK_ORDER.get(r["risk"], 9), -r["conf"]))
+    tentative.sort(key=lambda r: -r["conf"])
 
-    fb = ("  \n> Stage 1 เจอเหล็กน้อย (%.0f%%) — เพิ่มการตรวจทั้งภาพเป็น fallback"
-          % (metal_ratio * 100)) if meta["fallback_full_image"] else ""
+    # ----- ข้อมูลเทคนิค -----
+    notes = [f"โมเดล Stage 2: {_STATE.get('s2_key', model_key)}"
+             + ("  (แปลง crop เป็นขาวดำก่อนตรวจ)" if getattr(s2, "_steel_gray", False) else "")]
+    if gate_p is not None:
+        notes.append(f"Stage 0: ตัวจำแนกพื้นผิวประเมิน P(เหล็ก) = {gate_p:.0%}"
+                     + ("  (ต่ำ — classifier ยัง bias ไปภาพแล็บ ใช้ประกอบเท่านั้น)"
+                        if gate_p < 0.5 else ""))
+    elif gate_on:
+        notes.append("Stage 0: ยังไม่มีโมเดล gate (รัน train_gate.py) — ข้ามการเช็คพื้นผิวเหล็ก")
+    if meta["fallback_full_image"]:
+        notes.append("Stage 1 เจอเหล็กน้อย (%.0f%%) จึงตรวจทั้งภาพเป็น fallback" % (metal_ratio * 100))
     if _STATE["class_conf"]:
-        fb += "  \n> ใช้ threshold รายคลาส (thresholds.json) — สไลเดอร์เป็นค่าขั้นต่ำ"
-    verdict += ("\n\n`Stage 1: %d บริเวณ / เหล็กครอบคลุม %.0f%%`  "
-                "`Stage 2: %d จุด`  `device: %s`%s"
-                % (n_metal, metal_ratio * 100, len(rows), device, fb))
+        notes.append(f"โหมดความไว: {sensitivity} (threshold รายคลาส × {scale:g})")
+    if detailed:
+        notes.append("เปิดโหมดตรวจละเอียด (test-time augmentation)")
+    info_md = ("`Stage 1: %d บริเวณ · เหล็กครอบคลุม %.0f%%`  `Stage 2: %d จุด (+%d อาจมี)`  `อุปกรณ์: %s`"
+               % (n_metal, metal_ratio * 100, len(confirmed), len(tentative), device))
+    if notes:
+        info_md += "\n\n" + "\n".join("- " + n for n in notes)
 
-    return (cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), stage1_img, verdict, rows)
+    # "อาจไม่ใช่พื้นผิวเหล็ก" — เป็นแค่หมายเหตุ ไม่ใช่คำตัดสิน:
+    #   ตัวจำแนกพื้นผิว + DMS46 ทั้งคู่ bias ไปภาพแล็บ crop ระยะใกล้ → เหล็กสนิม/เหล็กผุ
+    #   ในภาพถ่ายจริงก็ได้ P(เหล็ก)≈0 และ metal_ratio≈0 เหมือนกัน (เจอกับ real_test หลายภาพ)
+    #   เดิมโชว์เป็น headline "ไม่พบพื้นผิวเหล็ก" → ฟันธงผิดกับภาพเหล็กจริงที่ยากที่สุด
+    maybe_not_steel = (gate_p is not None and gate_p < 0.10
+                       and metal_ratio < 0.02 and not confirmed and not tentative)
+    status = _status_html(confirmed, tentative, maybe_not_steel, gate_p)
+
+    rows = _rows_data(confirmed, tentative)
+    verdict = re.sub(r"<[^>]+>", " ", status)
+    verdict = re.sub(r"\s+", " ", verdict).strip()
+    state = {
+        "model": _STATE.get("s2_key", model_key),
+        "verdict": verdict,
+        "sensitivity": sensitivity,
+        "gate_p": round(gate_p, 3) if gate_p is not None else None,
+        "stage1_metal_ratio": round(metal_ratio, 4),
+        "fallback_full_image": meta["fallback_full_image"],
+        "detections": [
+            {"region": r["tag"], "class": r["class"], "name_th": r["name_th"],
+             "confidence": round(r["conf"], 4), "risk": r["risk"], "status": "confirmed"}
+            for r in confirmed
+        ] + [
+            {"region": r["tag"], "class": r["class"], "name_th": r["name_th"],
+             "confidence": round(r["conf"], 4), "risk": r["risk"], "status": "tentative"}
+            for r in tentative
+        ],
+    }
+    return (cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), stage1_img,
+            status, rows, info_md, state)
+
+
+def _globs(d):
+    return [[str(p)] for p in sorted(d.glob("*"))
+            if p.suffix.lower() in P.IMAGE_EXTS] if d.exists() else []
+
+
+# ---------- ดาวน์โหลดผล + feedback ----------
+def prepare_download(annotated_rgb, state):
+    """เขียนผลลัพธ์ (ภาพ annotated + JSON) เป็นไฟล์ zip ให้กดดาวน์โหลด"""
+    if annotated_rgb is None or not state:
+        return gr.update(visible=False)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp = Path(tempfile.mkdtemp(prefix="steeldemo_"))
+    jpg = tmp / f"result_{ts}.jpg"
+    cv2.imwrite(str(jpg), cv2.cvtColor(np.asarray(annotated_rgb), cv2.COLOR_RGB2BGR),
+                [cv2.IMWRITE_JPEG_QUALITY, 92])
+    js = tmp / f"result_{ts}.json"
+    js.write_text(json.dumps({"timestamp": ts, **state}, ensure_ascii=False, indent=2),
+                  encoding="utf-8")
+    zp = tmp / f"steel_result_{ts}.zip"
+    with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(jpg, jpg.name)
+        z.write(js, js.name)
+    return gr.update(value=str(zp), visible=True)
+
+
+def submit_feedback(orig_rgb, annotated_rgb, state, rating, comment):
+    """บันทึก feedback ของผู้ทดลอง -> demo_logs/feedback.csv (+ ภาพ/ผล ถ้ามี rating)"""
+    if not rating:
+        return "เลือกระดับผลตรวจก่อนกดส่ง"
+    LOG_DIR.mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    row_dir = LOG_DIR / ts
+    row_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if orig_rgb is not None:
+            cv2.imwrite(str(row_dir / "input.jpg"),
+                        cv2.cvtColor(np.asarray(orig_rgb), cv2.COLOR_RGB2BGR))
+        if annotated_rgb is not None:
+            cv2.imwrite(str(row_dir / "result.jpg"),
+                        cv2.cvtColor(np.asarray(annotated_rgb), cv2.COLOR_RGB2BGR))
+        (row_dir / "result.json").write_text(
+            json.dumps(state or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print("feedback save (image) error:", e)
+    csv_path = LOG_DIR / "feedback.csv"
+    new = not csv_path.exists()
+    with csv_path.open("a", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["timestamp", "rating", "comment", "model", "verdict",
+                        "n_detections", "folder"])
+        st = state or {}
+        w.writerow([ts, rating, (comment or "").replace("\n", " ").strip(),
+                    st.get("model", ""), st.get("verdict", ""),
+                    len(st.get("detections", [])), ts])
+    print(f"feedback: {rating} | {comment!r} -> {row_dir}")
+    return "ขอบคุณสำหรับ feedback — บันทึกแล้ว"
+
+
+_CSS = """
+:root{color-scheme:light}
+footer{display:none!important}
+body,.gradio-container{background:#ffffff!important}
+.gradio-container{max-width:1180px!important;margin:0 auto!important;padding:10px 12px 28px!important}
+/* ภาพผลตรวจ — ปรับตามอัตราส่วนภาพเอง จำกัดความสูงไม่ให้ล้นจอ */
+.result-img{border:1px solid #eef1f4;border-radius:12px;background:#fbfcfd;min-height:220px}
+.result-img img{object-fit:contain!important;max-height:72vh!important}
+/* หัวเรื่อง */
+.hd{padding:6px 2px 14px}
+.hd-title{font-size:22px;font-weight:700;color:#0f172a;letter-spacing:.2px;line-height:1.25}
+.hd-sub{font-size:13px;color:#64748b;margin-top:5px;line-height:1.5}
+.hd-note{font-size:11.5px;color:#aeb7c2;margin-top:4px}
+.hint{font-size:12px;color:#94a3b8;margin:-2px 0 8px}
+/* การ์ดสรุปผล */
+.rc{border:1px solid #eef1f4;border-left:5px solid #cbd5e1;border-radius:12px;
+    padding:13px 16px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+.rc-kicker{font-size:10.5px;letter-spacing:.12em;color:#aeb7c2;text-transform:uppercase}
+.rc-title{font-size:17px;font-weight:700;color:#0f172a;line-height:1.35;margin-top:3px}
+.rc-sub{font-size:13px;color:#5b6675;margin-top:6px;line-height:1.55}
+/* legend ใต้ภาพผล */
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:9px 2px 2px}
+.lg{font-size:11.5px;color:#64748b;display:flex;align-items:center}
+.lg::before{content:"";width:12px;height:12px;border-radius:3px;margin-right:6px;flex:none}
+.lg-def::before{background:#ef4444}
+.lg-may::before{background:#f59e0b}
+.lg-metal::before{background:#fff;border:2px solid #22c55e}
+.foot{font-size:11.5px;color:#a3adba;line-height:1.6;padding:14px 2px 2px;
+    border-top:1px solid #f2f5f8;margin-top:16px}
+/* กล่องขอบเขต/ข้อจำกัด */
+.limits{border:1px solid #fde8c8;background:#fffaf0;border-radius:10px;
+    padding:11px 15px;margin:2px 2px 12px;font-size:12.5px;color:#7a5b2e;line-height:1.6}
+.limits b{color:#8a5a1c}
+/* feedback */
+.fb{border:1px solid #eef1f4;border-radius:12px;padding:12px 16px;margin-top:10px;background:#fcfdfe}
+.fb-h{font-size:13px;font-weight:700;color:#334155;margin-bottom:2px}
+/* ตารางผล (gr.Dataframe) — เลื่อนแนวนอนได้เมื่อจอแคบ */
+.res-table .table-wrap, .res-table table{font-size:13px!important}
+.res-table{overflow-x:auto}
+/* ===== จอมือถือ / จอแคบ ===== */
+@media (max-width:640px){
+  .gradio-container{padding:6px 8px 24px!important}
+  .hd-title{font-size:19px}
+  .hd-sub{font-size:12px}
+  .result-img img{max-height:56vh!important}
+  .rc{padding:12px 14px}
+  .rc-title{font-size:15.5px}
+  .rc-sub{font-size:12.5px}
+  .res-table .table-wrap, .res-table table{font-size:12px!important}
+}
+"""
 
 
 def build_ui():
-    sample_dir = BASE_DIR / "test_images"
-    samples = [[str(p)] for p in sorted(sample_dir.glob("*")) if p.suffix.lower() in P.IMAGE_EXTS] \
-        if sample_dir.exists() else []
+    lab_samples = _globs(BASE_DIR / "test_images")                 # NEU/Rust crop — โชว์ครบ 8 คลาส
+    real_samples = _globs(BASE_DIR / "real_test" / "images")       # ภาพถ่ายจริงระดับ scene
+    model_choices = list(_available_models())
 
-    with gr.Blocks(title="Steel Defect Detection (2-stage)") as demo:
-        gr.Markdown(
-            "# ตรวจจับตำหนิพื้นผิวเหล็ก — Prototype\n"
-            "**Stage 1** DMS46 หาพื้นที่ที่เป็นเหล็ก → **Stage 2** YOLO11s (train-gray-s) ตรวจชนิดตำหนิ 8 ประเภท "
-            "— crazing, inclusion, patches, pitted_surface, rolled-in_scale, scratches, rust, crack\n"
-            "> prototype ผู้ช่วยคัดกรอง — ไม่ใช่ระบบตรวจสอบใช้งานจริง"
+    with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก") as demo:
+        gr.HTML(
+            "<div class='hd'>"
+            "<div class='hd-title'>ตรวจจับตำหนิพื้นผิวเหล็ก</div>"
+            "<div class='hd-sub'>ผู้ช่วยคัดกรองสภาพผิวเหล็กจากภาพถ่าย · ตรวจตำหนิ 8 ชนิด "
+            "(รอยแตกลายงา, สิ่งแปลกปลอม, ผิวลอก, ผิวเป็นหลุม, สะเก็ดรีด, รอยขีดข่วน, สนิม, รอยแตกร้าว)</div>"
+            "<div class='hd-note'>prototype เพื่อการศึกษา — ไม่ใช่ระบบตรวจสอบใช้งานจริง</div>"
+            "</div>"
         )
-        with gr.Row():
-            with gr.Column(scale=1):
-                inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ", height=360)
-                conf = gr.Slider(0.1, 0.9, value=0.4, step=0.05,
-                                 label="Confidence threshold (Stage 2)")
-                detailed = gr.Checkbox(
-                    value=False,
-                    label="ตรวจละเอียด (test-time augmentation — ช้าลง ~2-3x, recall ดีขึ้นเล็กน้อย)")
-                btn = gr.Button("ตรวจสอบ", variant="primary")
-                if samples:
-                    gr.Examples(examples=samples, inputs=inp, label="ตัวอย่างภาพ")
-            with gr.Column(scale=1):
-                verdict = gr.Markdown("อัปโหลดภาพแล้วกด **ตรวจสอบ**")
-                out_tbl = gr.Dataframe(
-                    headers=["บริเวณ", "class", "ชนิด (ไทย)", "ความมั่นใจ", "ความเสี่ยง"],
-                    label="รายการตำหนิที่พบ (เรียงตามความเสี่ยง)",
-                    interactive=False, wrap=True,
-                )
-        with gr.Row():
-            out_img = gr.Image(type="numpy", label="ผลลัพธ์ (กรอบเขียว = บริเวณเหล็ก, กรอบแดง = ตำหนิ)")
-            out_s1 = gr.Image(type="numpy", label="Stage 1 — พื้นที่ที่เป็นเหล็ก (เขียว) / fallback (ส้ม)")
+        gr.HTML(
+            "<div class='limits'>"
+            "<b>ขอบเขตและข้อจำกัด (อ่านก่อนใช้):</b> "
+            "ระบบตรวจ <b>สนิม</b> ได้ดีที่สุด ส่วนตำหนิชนิดอื่นบนภาพถ่ายจริงยังพลาดได้บ่อย "
+            "(โมเดลฝึกจากภาพแล็บระยะใกล้เป็นหลัก) · "
+            "ควรถ่ายให้เห็นผิวเหล็กเต็มเฟรม ระยะใกล้–กลาง แสงสว่างพอ ไม่เบลอ · "
+            "ผลที่ได้เป็นเพียงตัวช่วยคัดกรอง — <b>ห้ามใช้เป็นเกณฑ์ตัดสินคุณภาพชิ้นงานจริง</b>"
+            "</div>"
+        )
 
-        btn.click(analyze, inputs=[inp, conf, detailed],
-                  outputs=[out_img, out_s1, verdict, out_tbl])
+        # ===== ตัวเลือกขั้นสูง (ใช้ร่วมโหมด อัปโหลด / ถ่ายภาพ) =====
+        with gr.Accordion("ตัวเลือกขั้นสูง", open=False):
+            with gr.Row():
+                model_sel = gr.Dropdown(
+                    model_choices, value=model_choices[0] if model_choices else None,
+                    label="โมเดล Stage 2", scale=2)
+                sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
+                                label="โหมดความไว", scale=2)
+            with gr.Row():
+                conf = gr.Slider(0.1, 0.9, value=0.4, step=0.05,
+                                 label="Confidence ขั้นต่ำ (Stage 2)")
+                detailed = gr.Checkbox(value=False, label="ตรวจละเอียด (TTA — ช้าลง 2–3 เท่า)")
+                gate_on = gr.Checkbox(
+                    value=steel_gate.available(), interactive=steel_gate.available(),
+                    label="Stage 0: เช็คว่าเป็นพื้นผิวเหล็กก่อน")
+            multiscale = gr.Checkbox(
+                value=False,
+                label="ตรวจหลายสเกล + ตัดไทล์ (ภาพถ่ายจริง/ภาพใหญ่ — เจอมากขึ้น แต่ช้าลง 3–6 เท่า)")
+
+        cur_in = gr.State(None)   # ภาพล่าสุดที่ตรวจ (ไว้ให้ feedback)
+
+        # ===== 3 โหมด =====
+        with gr.Tabs():
+            with gr.Tab("อัปโหลดภาพ"):
+                inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ", height=300,
+                               sources=["upload", "clipboard"])
+                gr.HTML("<div class='hint'>ลากไฟล์มาวาง · กดเลือกไฟล์ · หรือวาง (Ctrl+V) "
+                        "— ระบบตรวจให้อัตโนมัติ</div>")
+                btn = gr.Button("ตรวจสอบ", variant="primary", size="lg")
+                if lab_samples or real_samples:
+                    gr.Examples(examples=(lab_samples + real_samples), inputs=inp,
+                                label="ภาพตัวอย่าง (กดเพื่อตรวจ)", examples_per_page=16)
+
+            with gr.Tab("ถ่ายภาพ"):
+                cam = gr.Image(type="numpy", label="กล้อง", height=340, sources=["webcam"])
+                gr.HTML("<div class='hint'>อนุญาตให้เบราว์เซอร์ใช้กล้อง → เล็งไปที่ผิวเหล็ก → "
+                        "<b>กดปุ่มถ่าย (วงกลม) ที่มุมล่างของภาพกล้อง</b> → ระบบตรวจให้อัตโนมัติ "
+                        "· กดถ่ายใหม่ได้เรื่อย ๆ</div>")
+
+            with gr.Tab("เรียลไทม์ (ทดลอง)"):
+                gr.HTML("<div class='hint'>ทดลอง — รัน YOLO บนเฟรมกล้องต่อเนื่อง (ข้าม Stage 1) "
+                        "ความแม่นเท่าโหมดภาพนิ่ง · เฟรมเบลอ/สั่นอาจเตือนผิด · ~3–8 เฟรม/วินาที</div>")
+                with gr.Row():
+                    rt_model = gr.Dropdown(
+                        model_choices, value=model_choices[0] if model_choices else None,
+                        label="โมเดล", scale=2)
+                    rt_sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="ไว",
+                                       label="ความไว", scale=2)
+                rt_in = gr.Image(type="numpy", label="กล้อง (สด)", height=280,
+                                 sources=["webcam"], streaming=True)
+                rt_out = gr.Image(type="numpy", label="ผลเรียลไทม์", interactive=False,
+                                  elem_classes=["result-img"])
+                rt_txt = gr.Markdown()
+
+        # ===== ผลตรวจ (โหมด อัปโหลด + ถ่ายภาพ) =====
+        with gr.Row(equal_height=False):
+            with gr.Column(scale=5, min_width=300):
+                status = gr.HTML(_empty_banner())
+            with gr.Column(scale=5, min_width=300):
+                table = gr.Dataframe(headers=TABLE_HEADERS, datatype=["str"] * 5,
+                                     row_count=(1, "dynamic"),
+                                     interactive=False, wrap=True,
+                                     elem_classes=["res-table"],
+                                     label="รายการตำหนิ (เรียงตามความเสี่ยง)")
+
+        # ----- ภาพผลลัพธ์ (เต็มความกว้าง ปรับตามอัตราส่วนภาพ) -----
+        out_img = gr.Image(type="numpy", label="ผลลัพธ์",
+                           interactive=False, elem_classes=["result-img"])
+        gr.HTML("<div class='legend'>"
+                "<span class='lg lg-def'>กรอบแดง = ตำหนิที่ยืนยัน</span>"
+                "<span class='lg lg-may'>กรอบส้ม = อาจมี</span>"
+                "<span class='lg lg-metal'>กรอบเขียว = บริเวณที่เป็นเหล็ก (เมื่อมีหลายบริเวณ)</span>"
+                "</div>")
+
+        # ----- Stage 1 (แสดงตลอด) -----
+        out_s1 = gr.Image(type="numpy", interactive=False, elem_classes=["result-img"],
+                          label="Stage 1 — พื้นที่ที่เป็นเหล็ก (เขียว = เหล็ก · ส้ม = ตรวจทั้งภาพ)")
+        with gr.Accordion("รายละเอียดทางเทคนิค", open=False):
+            info = gr.Markdown()
+
+        # ----- ดาวน์โหลดผล + feedback -----
+        res_state = gr.State({})
+        with gr.Row():
+            dl = gr.DownloadButton("ดาวน์โหลดผล (ภาพ + JSON)", visible=False, size="sm")
+        with gr.Group(elem_classes=["fb"]):
+            gr.HTML("<div class='fb-h'>ผลตรวจนี้เป็นอย่างไร? (ช่วยพัฒนาระบบ)</div>")
+            with gr.Row():
+                fb_rate = gr.Radio(["ถูกต้อง", "ผิด / ไม่ครบ", "ภาพนี้ไม่ควรตรวจ"],
+                                   label=None, show_label=False, scale=3)
+                fb_send = gr.Button("ส่ง feedback", size="sm", scale=1)
+            fb_comment = gr.Textbox(label=None, show_label=False, lines=1,
+                                    placeholder="ความเห็นเพิ่มเติม (ถ้ามี) เช่น ตำหนิที่ระบบพลาด")
+            fb_msg = gr.Markdown()
+
+        gr.HTML("<div class='foot'>Stage 1: DMS46 หาพื้นที่โลหะ (soft-gate + ตรวจทั้งภาพเมื่อไม่พบ) "
+                "จากนั้น Stage 2: YOLO11n ตรวจตำหนิ 8 ชนิด · โมเดลเทรนจาก NEU-DET + Roboflow "
+                "(+ ภาพถ่ายจริงสำหรับตัว “ปรับโดเมน”) · feedback/ภาพที่ส่ง เก็บในเครื่องนี้ (demo_logs/)</div>")
+
+        outputs = [out_img, out_s1, status, table, info, res_state]
+
+        def _wire(trigger, img_comp):
+            ins = [img_comp, conf, detailed, sens, model_sel, gate_on, multiscale]
+            (trigger(lambda x: x, img_comp, cur_in)
+             .then(analyze, inputs=ins, outputs=outputs, show_progress="minimal")
+             .then(prepare_download, inputs=[out_img, res_state], outputs=dl))
+
+        _wire(btn.click, inp)
+        _wire(inp.change, inp)
+        _wire(cam.change, cam)
+        # เปลี่ยนตัวเลือก -> ตรวจภาพล่าสุดซ้ำ (ทั้งอัปโหลดและถ่าย)
+        for c in (sens, model_sel, gate_on, conf, detailed):
+            (c.change(analyze, inputs=[cur_in, conf, detailed, sens, model_sel, gate_on, multiscale],
+                      outputs=outputs, show_progress="minimal")
+             .then(prepare_download, inputs=[out_img, res_state], outputs=dl))
+
+        fb_send.click(submit_feedback,
+                      inputs=[cur_in, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
+
+        # โหมดเรียลไทม์ (ทดลอง) — สตรีมเฟรมกล้อง
+        rt_in.stream(analyze_stream, inputs=[rt_in, rt_model, rt_sens],
+                     outputs=[rt_out, rt_txt], show_progress="hidden",
+                     stream_every=0.4, concurrency_limit=1)
     return demo
 
 
@@ -213,8 +714,14 @@ if __name__ == "__main__":
                           "ให้คนที่ต่อ wifi/สายเดียวกันเข้าได้ด้วย")
     args = ap.parse_args()
 
+    av = _available_models()
+    if not av:
+        sys.exit("ไม่พบไฟล์ weights ของ Stage 2 เลย — เทรนก่อนด้วย train.py / run_round.py")
     print("กำลังเตรียมโมเดล (โหลดครั้งเดียวตอนเริ่ม)...")
-    _ensure_models()
+    for k in av:                     # warm ทุกโมเดลที่เลือกได้ ให้สลับในหน้าเดโมแล้วไม่ต้องรอโหลด
+        _ensure_models(k)
+    _ensure_models(next(iter(av)))   # ให้ default เป็นตัวที่ active ล่าสุด
+    print(f"โมเดล Stage 2 ที่ใช้ได้: {', '.join(av)}  (ค่าเริ่มต้น: {next(iter(av))})\n")
 
     host = "127.0.0.1" if args.local_only else "0.0.0.0"
     print(f"พร้อมใช้งาน — เปิดเองที่ http://127.0.0.1:{args.port}")
@@ -224,8 +731,12 @@ if __name__ == "__main__":
             print(f"คนอื่นในวง wifi/LAN เดียวกัน เปิดที่ http://{lan_ip}:{args.port}")
         print("  (ถ้าเข้าจากเครื่องอื่นไม่ได้ ให้เช็ค Windows Firewall — "
               f"ต้องอนุญาต inbound พอร์ต {args.port} สำหรับเครือข่ายส่วนตัว/Private)")
+        print("  หมายเหตุกล้อง: การถ่ายจากกล้องบนมือถือ/เครื่องอื่นผ่าน http://<LAN-IP> จะถูกเบราว์เซอร์บล็อก")
+        print("               ถ้าจะให้ถ่ายกล้องได้ ใช้  python app.py --share  (ลิงก์ *.gradio.live เป็น https)")
     if args.share:
-        print("กำลังสร้างลิงก์สาธารณะ *.gradio.live ... (รอสักครู่)")
+        print("กำลังสร้างลิงก์สาธารณะ *.gradio.live ... (รอสักครู่ — ลิงก์นี้ถ่ายจากกล้องได้)")
     print()
 
-    build_ui().queue().launch(server_name=host, server_port=args.port, share=args.share)
+    build_ui().queue().launch(
+        server_name=host, server_port=args.port, share=args.share,
+        theme=gr.themes.Soft(primary_hue="blue", neutral_hue="gray"), css=_CSS)

@@ -1,0 +1,71 @@
+{
+  "device": "cuda",
+  "stage2_weights": "runs\\detect\\train-gray-n2-s1\\weights\\best.pt",
+  "stage2": {
+    "split": "test",
+    "overall": {
+      "mAP50": 0.8535,
+      "mAP50-95": 0.5407,
+      "precision": 0.8518,
+      "recall": 0.8007
+    },
+    "per_class": [
+      {
+        "class": "crazing",
+        "precision": 0.8792,
+        "recall": 0.8,
+        "mAP50": 0.8002,
+        "mAP50-95": 0.4721
+      },
+      {
+        "class": "inclusion",
+        "precision": 0.833,
+        "recall": 0.7791,
+        "mAP50": 0.8651,
+        "mAP50-95": 0.4564
+      },
+      {
+        "class": "patches",
+        "precision": 0.8683,
+        "recall": 0.871,
+        "mAP50": 0.9464,
+        "mAP50-95": 0.5487
+      },
+      {
+        "class": "pitted_surface",
+        "precision": 0.8004,
+        "recall": 0.7949,
+        "mAP50": 0.8411,
+        "mAP50-95": 0.4724
+      },
+      {
+        "class": "rolled-in_scale",
+        "precision": 0.7527,
+        "recall": 0.7,
+        "mAP50": 0.7734,
+        "mAP50-95": 0.4496
+      },
+      {
+        "class": "scratches",
+        "precision": 0.8478,
+        "recall": 0.8824,
+        "mAP50": 0.9237,
+        "mAP50-95": 0.5082
+      },
+      {
+        "class": "rust",
+        "precision": 0.994,
+        "recall": 1.0,
+        "mAP50": 0.995,
+        "mAP50-95": 0.9812
+      },
+      {
+        "class": "crack",
+        "precision": 0.8388,
+        "recall": 0.578,
+        "mAP50": 0.6828,
+        "mAP50-95": 0.437
+      }
+    ]
+  }
+}

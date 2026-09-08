@@ -33,10 +33,15 @@ def main():
     parser.add_argument("--patience", type=int, default=20, help="early stopping")
     parser.add_argument("--resume", action="store_true", help="เทรนต่อจาก checkpoint ล่าสุด")
     parser.add_argument("--workers", type=int, default=8)
-    parser.add_argument("--recipe", default="default", choices=["default", "texture"],
+    parser.add_argument("--seed", type=int, default=0, help="random seed (multi-seed runs)")
+    parser.add_argument("--recipe", default="default",
+                        choices=["default", "texture", "camera", "domainrand"],
                         help="default = augmentation เดิม | "
-                             "texture = ลด mosaic/scale เพื่อรักษา texture เต็มภาพ "
-                             "(แก้คลาส crazing/rolled-in_scale ที่โดนมองข้าม)")
+                             "texture = ลด mosaic/scale เพื่อรักษา texture เต็มภาพ | "
+                             "camera = จำลองภาพถ่ายกล้อง/มือถือจริง | "
+                             "domainrand = domain randomization แรงสุด (photometric/scale/perspective "
+                             "สุดขั้ว + copy_paste + randaugment) — สำหรับกรณีไม่มีข้อมูล target domain "
+                             "ใช้กับ merged_dataset (RGB)")
     args = parser.parse_args()
 
     if args.device == "auto":
@@ -80,6 +85,32 @@ def main():
                 mosaic=0.3, close_mosaic=20, mixup=0.0, erasing=0.2,
                 cos_lr=True,
             )
+        elif args.recipe == "domainrand":
+            # Domain Randomization — ไม่มีข้อมูล target domain (ภาพถ่ายจริงของ 6 คลาส texture)
+            # จึงสุ่ม appearance ให้กว้างสุด: แสง/สี/คอนทราสต์สุดขั้ว, สเกล 0.1x–1.9x (จำลองระยะ),
+            # perspective/shear (มุมกล้อง), copy_paste (แปะตำหนิลงพื้นหลังอื่น = คลาสหายาก + BG หลากหลาย),
+            # randaugment (photometric ops เพิ่ม), erasing สูง (บังคับเรียน local feature)
+            aug = dict(
+                hsv_h=0.05, hsv_s=0.9, hsv_v=0.6,
+                degrees=25.0, translate=0.15, scale=0.9,
+                shear=5.0, perspective=0.001,
+                fliplr=0.5, flipud=0.5, bgr=0.1,
+                mosaic=1.0, close_mosaic=15, mixup=0.15, copy_paste=0.3,
+                erasing=0.5, auto_augment="randaugment",
+                cos_lr=True,
+            )
+        elif args.recipe == "camera":
+            # จำลองภาพถ่ายกล้อง/มือถือจริง: แสง/สมดุลสีไม่คุม, เบลอจากการถือกล้อง,
+            # มุม/เพอร์สเปกทีฟ, บางส่วนถูกบัง. ใช้กับ merged_dataset (RGB) เพื่อเก็บ cue สี
+            # (สนิม = ส้มน้ำตาล). erasing สูง = บังคับให้เรียนตำหนิจาก local texture ไม่ใช่ทั้งภาพ
+            aug = dict(
+                hsv_h=0.03, hsv_s=0.7, hsv_v=0.5,          # white-balance / แสงแปรปรวน
+                degrees=15.0, translate=0.12, scale=0.5,
+                shear=3.0, perspective=0.0005,             # มุมกล้องเอียง
+                fliplr=0.5, flipud=0.3,
+                mosaic=0.6, close_mosaic=15, mixup=0.1, erasing=0.4,
+                cos_lr=True,
+            )
         else:
             aug = dict(
                 hsv_h=0.015, hsv_s=0.5, hsv_v=0.4,
@@ -98,7 +129,7 @@ def main():
             name=args.name,
             patience=args.patience,
             workers=args.workers,
-            seed=0,
+            seed=args.seed,
             deterministic=True,
             **aug,
         )

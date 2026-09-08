@@ -57,6 +57,13 @@
 | เสมอตัวเรื่อง F1 แต่ +~200 ms/ภาพ | ตัดออก — รายงานเป็น **negative ablation** (เป็น contribution ที่ให้เหตุผลกับระบบที่ง่ายกว่า) |
 | ช่วยเฉพาะภาพพื้นหลังรก | เก็บแบบ **soft-gate + fallback** (implement ไว้แล้วใน `pipeline.py`: `metal_ratio < 0.05` → ตรวจทั้งภาพ) |
 
+**→ ผลจริง (2026-09-07, `real_test/` 18 ภาพ): แถวที่ 2 — negative ablation.**
+Stage 1 ทำงานบ่อยขึ้นบนภาพ scene จริง (metal_found_rate 0.35 บน crop แล็บ → **0.56** บน real_test)
+แต่ pipeline (มี Stage 1) micro-P **ต่ำกว่า** baseline (ไม่มี Stage 1) ทั้ง train-gray-n2 (0.143 vs 0.333)
+และ train-real1 (0.692 vs 0.750) — กรอบ metal ที่เพี้ยน + fallback ทำให้เกิด FP เพิ่มโดยไม่ได้ recall กลับมา
+เก็บ `pipeline.py` (soft-gate + fallback + cross-region NMS) ไว้เป็นโค้ด แต่บทสรุปเล่ม = **"2-stage ไม่คุ้มสำหรับ use case นี้;
+material segmentation ระดับฉากไม่เหมาะเป็น front-end — future work คือ classifier เหล็ก/ไม่เหล็กตัวเล็ก fine-tune เอง"**
+
 ### หลักฐานที่มีอยู่แล้ว (`evaluate_stage1.py`, test split 416 ภาพ)
 - metal_found_rate 0.35, **fallback_rate 0.78**, box_coverage 0.10, gt_area_kept 0.16, latency 208  ms/ภาพ (GPU)
 - บนภาพ scene จริง (`test_images/`) DMS46 เจอเหล็ก 24–82%
@@ -72,7 +79,7 @@
 |---|---|---|---|
 | **A** | YOLO11n ภาพเต็ม **ไม่มี Stage 1** | มีใน `evaluate_real.py --mode baseline` | **control หลักของทั้งเล่ม** — พิสูจน์ว่า 2-stage คุ้มหรือไม่ |
 | **B** | train-clean vs **train-balanced** | ✅ เสร็จ (README ตารางเปรียบเทียบ) | ablation ของ class-balanced oversampling + recipe texture |
-| **C** | yolo11n vs yolo11s | ✅ `train-gray-n` vs `train-gray-s` (protocol เดียวกัน) | yolo11s เพิ่มแค่ +0.017 mAP50 — model size ไม่ใช่ปัจจัยหลัก, เกน Tier 1+2 มาจาก label+gray |
+| **C** | yolo11n vs yolo11s | ✅ `train-gray-n2` vs `train-gray-s2` (split สะอาด, protocol เดียวกัน) | บน split สะอาด yolo11n **สูงกว่า** yolo11s เล็กน้อย (0.867 vs 0.840) — ยืนยันชัดว่า model size ไม่ใช่ปัจจัยหลัก |
 | เสริม | ตัวเลขจากเปเปอร์ NEU-DET | 1 ย่อหน้า | อ้าง 2–3 ฉบับ (YOLO บน NEU-DET ปกติ mAP ~0.70–0.80) เป็นบริบท — **ไม่เทรนซ้ำ** เพราะ dataset นี้แก้ไปมาก (8 คลาส, re-split, รวม 3 แหล่ง) เทียบตรงไม่ได้ |
 
 **ไม่ทำ** (ถ้าอาจารย์ไม่ขอ): Faster R-CNN / RT-DETR / สถาปัตยกรรมอื่น — เปลืองเวลา ไม่เกี่ยวกับโจทย์ผู้ช่วยคัดกรอง
@@ -93,18 +100,23 @@
 
 | งาน | สถานะ |
 |---|---|
-| **Data leakage audit** (`check_leakage.py`) | ✅ พบ rust valid 100% / test 98% รั่ว (Roboflow burst photos) |
+| **Data leakage audit** (`check_leakage.py`) | ✅ พบ rust valid 100% / test 98% รั่ว (Roboflow burst photos) 932 คู่ |
 | **Group-aware re-split** (`resplit_grouped.py`) | ✅ split ใหม่ 3338/422/425, leakage = 0, backup `results/split_manifest_preleakagefix.json` |
-| **Retrain บน split สะอาด** | ⏳ ตัวเลข mAP ทั้งหมดในตารางล่างเป็นของ split เก่า (รั่ว) — ต้องเทรน+วัดใหม่ (ดู NEXT_STEPS ขั้น 0.5) |
+| **Retrain + re-eval + multi-seed บน split สะอาด** | ✅ 2026-09-06 — **โมเดลหลัก = `train-gray-n2` (yolo11n)** test mAP50 **0.867 ± 0.010** (n=4); yolo11s 0.840 (ต่ำกว่า); ตัวเลขในตารางล่างอัปเดตแล้ว |
 | Stage 2 train-balanced (yolo11n) | ✅ mAP50 0.763 / R 0.753 — baseline |
-| **Stage 2 train-gray-s (yolo11s + Tier 1+2)** | ✅ **mAP50 0.853 / mAP50-95 0.537 / R 0.809** — `runs/detect/train-gray-s` (pipeline ชี้ตัวนี้), val 0.854 ≈ test → ไม่ overfit |
+| **Stage 2 train-gray-n2 (yolo11n, split สะอาด) — โมเดลหลัก** | ✅ **test mAP50 0.867 ± 0.010 / mAP50-95 0.536 ± 0.009 / R 0.809** (multi-seed n=4) — `runs/detect/train-gray-n2` (pipeline ชี้ตัวนี้) |
+| Stage 2 train-gray-s2 (yolo11s, split สะอาด) | ✅ test mAP50 0.840 — เล็กกว่า n2 ~2.7σ; ใหญ่กว่า 4x, ช้ากว่า 2x → ไม่ใช้ |
+| multi-seed (`aggregate_seeds.py`, n=4) | ✅ `results/stage2_multiseed.json` — crack อ่อนสุด 0.687 ± 0.011; crazing/rolled-in_scale std สูง (~0.05) |
 | Tier 1: `fix_labels.py` (merge crazing/rolled-in) + `make_grayscale_dataset.py` | ✅ |
-| Tier 2: `tune_thresholds.py` → macro-F1 val 0.814 → 0.843 | ✅ `thresholds.json` |
+| Tier 2: `tune_thresholds.py` (n2) → macro-F1 val 0.824 → 0.844 | ✅ `thresholds.json` |
 | Ablation B (aug/oversampling) | ✅ README + `figures/confusion_compare.png` |
 | `evaluate_stage1.py` | ✅ รันเต็ม 416 ภาพ → `results/stage1_dms46_test.json` |
 | cross-region NMS ใน `pipeline.py` | ✅ |
-| Ablation แยกผล label+gray vs 11n→11s | ✅ `train-gray-n` mAP50 0.836 vs `train-gray-s` 0.853 → label+gray = +0.29, model size = +0.017 (`results/stage2_train-gray-n.json`) |
-| `real_test/` | ⏳ ต้องเก็บภาพเอง (ดู `NEXT_STEPS.md` ข้อ 3) |
-| Ablation Stage 1 (`evaluate_real.py`) | ⏳ รอ `real_test/` |
-| multi-seed / CI, leakage check, เทียบเปเปอร์ NEU-DET | ⏳ |
+| Ablation แยกผล label+gray vs 11n vs 11s | ✅ split สะอาด: `train-gray-n2` **0.867 ± 0.010** > `train-gray-s2` 0.840 → **yolo11n ดีกว่า** yolo11s; เกนหลักมาจาก label+gray |
+| `real_test/` | ⚠️ มี 18 ภาพ (net-sourced, เอียง rust, ไม่มี inclusion/rolled-in/crazing, ยังไม่มี URL) — ใช้ได้ระดับ "แสดง domain gap" ไม่ใช่ validation เต็ม |
+| Ablation Stage 1 (`evaluate_real.py`) | ✅ 2026-09-07 — **negative ablation**: บน real_test Stage 1 metal_found_rate 0.56 แต่ pipeline micro-P < baseline ทั้ง train-gray-n2 และ train-real1 → เก็บโค้ดไว้ รายงานว่าไม่คุ้ม (บทสรุป = แถวที่ 2 ในตารางข้อ 2) |
+| Real-photo domain gap | ✅ train-gray-n2 บน real_test: micro-R 0.043, rust 0/12 (conf 0.92 แล็บกรองหมด) — ตรงกับ GC10 transfer ≈ 0. ราง future work `train-real1` (+672 ภาพ corrosion): rust recall 0/12 → 8/12, micro-F1 0.067 → 0.50 |
+| multi-seed (n=4), leakage check, เทียบเปเปอร์ NEU-DET | ✅ `results/stage2_multiseed.json`, `check_leakage.py`, `literature_comparison.md` |
+| cross-dataset test (GC10-DET แทน real_test) | ✅ `evaluate_cross_dataset.py`, `cross_dataset_eval.md` — transfer ~0 |
+| Error Analysis | ✅ `docs/error_analysis.docx` (EA-1..5) |
 | เคลียร์ baseline กับอาจารย์ | ⏳ |

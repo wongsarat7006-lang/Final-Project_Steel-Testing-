@@ -36,3 +36,18 @@ __pycache__/
 
 # Cross-dataset test images (โหลดใหม่ได้จาก HF — ดู cross_dataset_eval.md)
 external_test/*/images/
+
+# ภาพถ่ายจริง / dataset ที่โหลดจากเน็ต + ผลของ active-learning loop (ไฟล์ใหญ่)
+downloads/
+photos_round*/
+dataset_real/
+
+# Stage 0 steel-gate: dataset ที่ประกอบจาก DTD/Imagenette (สร้างใหม่ได้ด้วย make_gate_dataset.py)
+dataset_gate/
+
+# เอกสารอ้างอิง/ร่างของผู้จัดทำ (ไม่ commit)
+docs/ต้นแบบ/
+docs/งานของผม/
+
+# feedback/log จากผู้ทดลองใช้เดโม
+demo_logs/

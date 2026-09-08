@@ -29,28 +29,31 @@ python evaluate_cross_dataset.py --dir external_test/gc10 --map external_test/gc
 2. **loc-agnostic** recall/precision — จับคู่กล่องที่ IoU ≥ 0.5 ไม่สนคลาส
 3. **mapped** — inclusion: P/R/F1 ระดับกล่อง (IoU ≥ 0.5 + คลาสตรง)
 
-## ผล (โมเดล `train-gray-s` split เก่า — ต้องรันซ้ำหลัง retrain)
+## ผล (โมเดลหลัก `train-gray-n2` — split สะอาด)
 
-`results/crossdataset_gc10.json` · 224 ภาพ · 347 GT boxes
+`results/crossdataset_gc10.json` · 224 ภาพ · 347 GT boxes · conf 0.4 · IoU 0.5
 
 | metric | pipeline (S1+S2) | baseline (S2 ภาพเต็ม) |
 |---|---|---|
-| presence recall | 0.237 | 0.138 |
-| loc-agnostic recall | **0.009** | **0.009** |
-| loc-agnostic precision | 0.050 | 0.094 |
-| inclusion (mapped) TP/FP/FN | 0 / 14 / 34 | 0 / 10 / 34 |
+| presence recall | 0.286 | 0.255 |
+| loc-agnostic recall | **0.026** | **0.023** |
+| loc-agnostic precision | 0.129 | 0.129 |
+| inclusion (mapped) TP/FP/FN | 0 / 20 / 34 | 0 / 16 / 34 |
 | Stage 1 metal-found rate | 0.46 | — |
 | Stage 1 fallback rate | 0.78 | — |
 
+> เทียบ 3 เวอร์ชันโมเดล (leaky s2 → clean s2 → clean n2): loc-agnostic recall 0.009 / 0.014 / 0.026,
+> inclusion TP = 0 ทุกเวอร์ชัน — ข้อสรุปเชิงคุณภาพไม่เปลี่ยน: **transfer แทบเป็นศูนย์**
+
 ### สรุป
-- **โมเดลแทบไม่ transfer ไป GC10-DET** — loc-agnostic recall ~1% (จับคู่ได้ 3/347 กล่อง),
-  inclusion ตรวจถูกตำแหน่ง 0 ครั้ง (ทายมั่ว 14 ครั้ง) — สอดคล้องกับ EA-1 (domain gap)
-- pipeline presence recall > baseline (+0.10) เพราะ region fallback ทำให้ยิงกล่อง (ที่ส่วนใหญ่ผิด)
-  มากขึ้น → precision ตกลง — **Stage 1 ไม่ได้ช่วยความแม่นบนชุดนี้**
-- ยืนยันว่าตัวเลข benchmark (mAP ~0.85 บน NEU-style crop) **ไม่ generalize** ไปโดเมนเหล็กอื่น
+- **โมเดลแทบไม่ transfer ไป GC10-DET** — loc-agnostic recall ~2.6% (จับคู่ได้ 9/347 กล่อง),
+  inclusion ตรวจถูกตำแหน่ง 0 ครั้ง (ทายผิดตำแหน่ง 20 ครั้ง) — สอดคล้องกับ EA-1 (domain gap)
+- pipeline presence recall > baseline เล็กน้อย (+0.03) เพราะ region fallback ยิงกล่องมากขึ้น
+  (ส่วนใหญ่ผิด) — **Stage 1 ไม่ได้ช่วยความแม่นบนชุดนี้**
+- ยืนยันว่าตัวเลข benchmark (mAP 0.867 บน NEU-style crop) **ไม่ generalize** ไปโดเมนเหล็กอื่น
   → เป็นข้อจำกัดหลักของระบบที่ต้องระบุในบทสรุป
 
 ### ทำต่อ
-- [ ] รันซ้ำด้วยโมเดลที่ retrain บน split สะอาด (คาดว่าผลเชิงคุณภาพไม่เปลี่ยน)
+- [x] รันซ้ำด้วยโมเดลหลัก `train-gray-n2` (multi-seed seed 0) — 2026-09-06, ผลไม่เปลี่ยน
 - [ ] (ถ้ามีเวลา) เพิ่ม Severstal steel defect (`Voxel51/severstal_steel_defects` บน HF) เป็น probe ที่ 2
       — เป็น segmentation mask 4 คลาสไม่มีชื่อ ต้องแปลงเป็น bbox ก่อน

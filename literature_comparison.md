@@ -29,8 +29,9 @@ feature fusion / loss ใหม่) ดันขึ้น **0.78–0.86**
 
 | | ค่า | หมายเหตุ |
 |---|---|---|
-| Stage 2 (train-gray-s) บน benchmark ของเรา | mAP50 ~0.82–0.85 (รอ retrain บน split สะอาด) | อยู่ในช่วงบนของ YOLO มาตรฐาน / ล่างของรุ่นปรับปรุง |
-| Cross-dataset → GC10-DET (train NEU-style, test GC10) | loc-agnostic recall ~0.01 | ดู `cross_dataset_eval.md` — **transfer แทบเป็นศูนย์** |
+| Stage 2 `train-gray-n2` (yolo11n) — **โมเดลหลัก**, split สะอาด, multi-seed n=4 | test mAP50 **0.867 ± 0.010** / mAP50-95 0.536 ± 0.009 | อยู่ในช่วงบนของ YOLO มาตรฐาน / ล่างของรุ่นปรับปรุง |
+| Stage 2 `train-gray-s2` (yolo11s) | test mAP50 0.840 (single run) | เล็กกว่า n2 → model size ไม่ใช่ปัจจัยหลัก |
+| Cross-dataset → GC10-DET (train NEU-style, test GC10) | loc-agnostic recall ~0.014 | ดู `cross_dataset_eval.md` — **transfer แทบเป็นศูนย์** |
 
 ## 4. ทำไมเทียบตรงกับ literature ไม่ได้ (ต้องเขียนกำกับไว้)
 

@@ -1,0 +1,180 @@
+{
+  "device": "cuda",
+  "conf": 0.4,
+  "n_images": 18,
+  "per_class_conf": {
+    "crazing": 0.483,
+    "inclusion": 0.377,
+    "patches": 0.453,
+    "pitted_surface": 0.266,
+    "rolled-in_scale": 0.558,
+    "scratches": 0.433,
+    "rust": 0.92,
+    "crack": 0.32
+  },
+  "pipeline": {
+    "micro_precision": 0.3333,
+    "micro_recall": 0.0435,
+    "micro_f1": 0.0769,
+    "macro_f1": 0.0667,
+    "per_class": [
+      {
+        "class": "crazing",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "inclusion",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "patches",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "pitted_surface",
+        "tp": 0,
+        "fp": 0,
+        "fn": 6,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "rolled-in_scale",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "scratches",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "rust",
+        "tp": 0,
+        "fp": 0,
+        "fn": 12,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "crack",
+        "tp": 1,
+        "fp": 2,
+        "fn": 2,
+        "precision": 0.3333,
+        "recall": 0.3333,
+        "f1": 0.3333
+      }
+    ],
+    "stage1_metal_found_rate": 0.5556,
+    "fallback_full_image_rate": 0.7222,
+    "avg_regions_per_image": 1.72,
+    "sec_per_image": 0.601
+  },
+  "baseline": {
+    "micro_precision": 0.3333,
+    "micro_recall": 0.0435,
+    "micro_f1": 0.0769,
+    "macro_f1": 0.0667,
+    "per_class": [
+      {
+        "class": "crazing",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "inclusion",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "patches",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "pitted_surface",
+        "tp": 0,
+        "fp": 0,
+        "fn": 6,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "rolled-in_scale",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "scratches",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "rust",
+        "tp": 0,
+        "fp": 0,
+        "fn": 12,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      {
+        "class": "crack",
+        "tp": 1,
+        "fp": 2,
+        "fn": 2,
+        "precision": 0.3333,
+        "recall": 0.3333,
+        "f1": 0.3333
+      }
+    ],
+    "sec_per_image": 0.039
+  }
+}

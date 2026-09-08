@@ -31,11 +31,11 @@ plt.rcParams["axes.unicode_minus"] = False
 
 # ---- ตัวเลขหลักฐาน (วัดได้จริงในเซสชันทดสอบ 2026-09-05) ----
 RUST_CONF = [
-    ("NEU/Roboflow crop\n(สไตล์ชุดเทรน)", 0.92, "#2e7d32"),
-    ("ภาพโซ่สนิม\nเต็มเฟรม", 0.21, "#e65100"),
-    ("ภาพ texture สนิม\n(stock photo)", 0.02, "#b71c1c"),
+    ("NEU/Roboflow crop\n(สไตล์ชุดเทรน)", 0.95, "#2e7d32"),
+    ("ภาพโซ่สนิม\nเต็มเฟรม", 0.00, "#b71c1c"),
+    ("ภาพ texture สนิม\n(stock photo)", 0.00, "#b71c1c"),
 ]
-RUST_THR = 0.90
+RUST_THR = 0.92
 
 STAGE1_RATIO = [
     ("NEU crop\ntest (n=416)", 0.05),
@@ -105,12 +105,12 @@ def make_figs():
 MODES = [
     ("EA-1", "Domain gap ของ Stage 2 (สไตล์ภาพนอกการกระจายของชุดเทรน)",
      "Stage 2 เทรนบน NEU-DET (crop texture เกรย์สเกลระยะใกล้) + Roboflow rust/crack "
-     "(ภาพสไตล์เฉพาะ) พอเจอภาพสนิมสไตล์อื่น—เช่น texture stock photo หรือโซ่สนิมเต็มเฟรม—"
-     "ความมั่นใจตกจาก ~0.92 (สไตล์ชุดเทรน) เหลือ 0.02–0.21 หลุดใต้ threshold ทุกกรณี "
-     "จึงรายงานว่า \"ไม่พบตำหนิ\" ทั้งที่ภาพเป็นสนิมชัดเจน",
+     "(ภาพสไตล์เฉพาะ) บนภาพสนิมสไตล์อื่น—texture stock photo หรือโซ่สนิมเต็มเฟรม—"
+     "โมเดลหลัก (train-gray-n2) ให้ raw confidence ของ rust ≈ 0 (ตรวจไม่เจอเลย) "
+     "เทียบกับ ~0.95 บน crop สไตล์ชุดเทรน จึงรายงาน \"ไม่พบตำหนิ\" ทั้งที่ภาพเป็นสนิมชัดเจน",
      "ea_2_rust_conf.png",
-     "หลักฐาน: ทดสอบ 3 ภาพ (สนิม.jpg raw conf ≈ 0.02 ; images(2).jpg โซ่สนิม 0.21 ; "
-     "Danger-Rust crop 0.92) — โมเดลตัวเดียวกัน ต่างกันแค่สไตล์ภาพ"),
+     "หลักฐาน: ทดสอบ 3 ภาพ (สนิม.jpg / images(2).jpg โซ่สนิม → 0 detections ทั้งคู่ ; "
+     "Danger-Rust crop 0.95) — โมเดล train-gray-n2 ตัวเดียวกัน ต่างกันแค่สไตล์ภาพ"),
     ("EA-2", "Stage 1 (DMS46) หาโลหะไม่เจอบนเหล็กทาสี / สนิมหนัก / ฉากรก",
      "DMS46 เป็น material segmentation ระดับฉากทั่วไป ไม่ได้ fine-tune กับเหล็กอุตสาหกรรม "
      "บน test set (crop NEU 416 ภาพ) fallback_rate 78%, gt_area_kept 16%; บนภาพฉากจริง "
@@ -118,27 +118,31 @@ MODES = [
      "เท่ากับ Stage 1 ไม่ได้ช่วยกรองพื้นหลังในเคสที่ควรช่วยที่สุด",
      "ea_3_stage1_ratio.png",
      "หลักฐาน: results/stage1_dms46_test.json (aggregate) + ทดสอบภาพฉาก 3 แบบในเซสชัน"),
-    ("EA-3", "False positive จากกราฟิก/โลโก้/ลายน้ำในภาพจริง",
-     "ภาพจากผู้ขายเหล็ก (โฆษณา) มักมีโลโก้บริษัท ตัวหนังสือ กรอบสี ทับบนภาพ "
-     "Stage 1 หาโลหะไม่เจอ (metal_ratio 0%) → fallback ทั้งภาพ → Stage 2 ไปตีกรอบ "
-     "\"โลโก้วงกลม\" แล้วจำแนกเป็น crack 37.7% (ผ่าน threshold ของ crack ที่ 0.36) "
-     "ขณะที่รอยขีดข่วนจริงกลางภาพได้แค่ 0.17 (ไม่ผ่าน) → ระบบตอบผิดทั้งชนิดและตำแหน่ง",
+    ("EA-3", "Per-class threshold เข้มเกินจนพลาดตำหนิที่ระบุชนิดถูก",
+     "ภาพโฆษณาผู้ขายเหล็ก (มีโลโก้/ตัวหนังสือทับ) Stage 1 หาโลหะไม่เจอ → fallback ทั้งภาพ. "
+     "โมเดลหลัก (train-gray-n2) ระบุ \"scratches\" ถูกที่ raw conf 0.43 แต่ต่ำกว่า per-class "
+     "threshold ของ scratches (0.433) เฉียดฉิว → รายงาน \"ไม่พบตำหนิ\" ทั้งที่ทายชนิดถูก. "
+     "(โมเดล s2 เดิมแย่กว่า — ตีกรอบโลโก้วงกลมแล้วทายเป็น crack 47%). "
+     "บทเรียน: threshold ที่ปรับจาก val สไตล์ NEU เข้มเกินไปกับภาพถ่ายจริง — ควรมี "
+     "threshold แยกสำหรับโหมด fallback / ภาพนอกโดเมน",
      "ea_1_logo_fp.png",
-     "หลักฐาน: real_test/images/real_002_stainless_scratch.webp — กรอบแดงอยู่ที่โลโก้ S.T.K. METAL"),
+     "หลักฐาน: real_test/images/real_002_stainless_scratch.webp — n2 raw: scratches 0.428 / 0.274"),
     ("EA-4", "Train/test leakage ในคลาส rust (แก้แล้ว — ดู check_leakage.py)",
      "ชุด Roboflow \"Danger-Rust\" เป็นภาพถ่ายรัว/เฟรมติดกัน การ split แบบสุ่มเดิมทำให้ "
-     "rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train → rust mAP 0.995 และ "
-     "overall mAP50 0.853 สูงเกินจริง แก้ด้วย group-aware re-split (resplit_grouped.py) "
-     "→ leakage = 0 แล้ว retrain/วัดผลใหม่",
+     "rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train (932 คู่). แก้ด้วย "
+     "group-aware re-split (resplit_grouped.py) → leakage = 0 แล้ว retrain. "
+     "ผลหลังแก้ (train-gray-n2, multi-seed n=4): overall mAP50 0.867 ± 0.010, "
+     "rust ยังได้ 0.995 ± 0.000 — แต่เป็นเพราะ subset rust เป็นกลุ่มภาพ homogeneous "
+     "แยกจาก NEU ง่าย ไม่ใช่ leakage แล้ว (ดู EA-1 + cross_dataset_eval.md)",
      None,
      "หลักฐาน: results/leakage_gray.json (932 คู่ก่อนแก้) / leakage_gray_after.json (0)"),
-    ("EA-5", "คลาสที่อ่อนแม้บน benchmark: crack และ inclusion",
-     "แม้บนชุดทดสอบสะอาด crack ได้ mAP50 ~0.67 / recall ~0.66 และ inclusion recall ~0.66 "
-     "— crack: grayscale ลด contrast ของรอยแยก + geometry เส้นบางทำ IoU ต่ำ; "
-     "inclusion: จุดเล็กกระจาย annotate ยาก เป็นข้อจำกัดที่พบใน literature ของ NEU-DET เช่นกัน "
-     "(ตัวเลขรายคลาสสุดท้ายให้ยึดผลหลัง retrain บน split ใหม่)",
+    ("EA-5", "คลาสที่อ่อนแม้บน benchmark: crack",
+     "multi-seed n=4 (train-gray-n2): crack mAP50 0.687 ± 0.011 / recall 0.606 ± 0.027 "
+     "— ต่ำกว่าคลาสอื่นชัด (คลาสอื่น 0.80-0.99). crack: grayscale ลด contrast ของรอยแยก + "
+     "geometry เส้นบางทำ IoU ต่ำ. crazing (0.867 ± 0.054) และ rolled-in_scale (0.819 ± 0.048) "
+     "std สูง = ไม่เสถียรข้าม seed. เป็นข้อจำกัดที่พบใน literature ของ NEU-DET เช่นกัน",
      None,
-     "หลักฐาน: results/stage2_train-gray-s.json (per_class) — จะอัปเดตหลัง retrain"),
+     "หลักฐาน: results/stage2_multiseed.json (per_class mean ± std, 4 seed)"),
 ]
 
 MITIGATION = [
@@ -147,8 +151,8 @@ MITIGATION = [
              "ระบุขอบเขตว่าใช้กับภาพสไตล์คัดกรอง (มือถือ ระยะ ~0.3–1 m) เท่านั้น"),
     ("EA-2", "แทน DMS46 ด้วย classifier/detector เหล็ก-ไม่เหล็กตัวเล็กที่เทรนกับโดเมนนี้ ; "
              "หรือคง soft-gate + fallback ปัจจุบันและรายงาน Stage 1 เป็น negative ablation"),
-    ("EA-3", "crop ขอบภาพ/ตัดแถบข้อความอัตโนมัติก่อนเข้าระบบ ; เพิ่ม negative sample "
-             "(โลโก้/ข้อความ/ฉาก) ตอนเทรน Stage 2 ; ยกเกณฑ์ความมั่นใจขั้นต่ำรวมเมื่อ fallback"),
+    ("EA-3", "ปรับ per-class threshold แยกสำหรับโหมด fallback / ภาพนอกโดเมน (ลดเกณฑ์ลง) ; "
+             "เพิ่ม negative sample (โลโก้/ข้อความ/ฉาก) ตอนเทรน Stage 2 ; crop แถบข้อความก่อนเข้าระบบ"),
     ("EA-4", "แก้แล้ว — group-aware re-split ; ผนวก check_leakage.py เข้าขั้นตอนเตรียมข้อมูล"),
     ("EA-5", "เก็บ crack แบบ RGB (ไม่ทำ grayscale) เป็น ablation ; oversample inclusion เพิ่ม ; "
              "ทดลอง imgsz สูงขึ้นเฉพาะ 2 คลาสนี้"),
@@ -214,7 +218,7 @@ def build_docx():
     table(["รหัส", "รูปแบบ", "ผลกระทบ"], [
         ("EA-1", "Domain gap ของ Stage 2", "พลาดตำหนิจริงบนภาพสไตล์นอกชุดเทรน (recall ตก)"),
         ("EA-2", "Stage 1 หาโลหะไม่เจอ (เหล็กทาสี/ฉากรก)", "Stage 1 ไม่ช่วยกรองพื้นหลังในเคสที่ควรช่วย"),
-        ("EA-3", "False positive จากโลโก้/ข้อความ", "ตอบผิดชนิดและตำแหน่ง"),
+        ("EA-3", "Per-class threshold เข้มเกินกับภาพนอกโดเมน", "พลาดตำหนิที่ระบุชนิดถูกแล้ว"),
         ("EA-4", "Train/test leakage (rust) — แก้แล้ว", "metric เดิมสูงเกินจริง"),
         ("EA-5", "คลาสอ่อน: crack, inclusion", "recall ต่ำแม้บน benchmark"),
     ], widths=[0.6, 2.6, 3.0])

@@ -18,6 +18,12 @@
     python evaluate_real.py
     python evaluate_real.py --mode pipeline --conf 0.35
     python evaluate_real.py --dir real_test --out real_test_results.json
+
+    # ค่าเริ่มต้น = โมเดลเล่มจบ (train-gray-n2, grayscale, rust conf 0.92) — transfer ~0 บนภาพจริง
+    # วัดรุ่นเดโม/ราง product (train-real1 + thresholds_demo.json, rust conf 0.12):
+    python evaluate_real.py --weights runs/detect/train-real1/weights/best.pt \
+                            --thresholds thresholds_demo.json \
+                            --out results/real_after_round1.json
 """
 import argparse
 import csv
@@ -148,8 +154,17 @@ def main():
     ap.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     ap.add_argument("--no-class-conf", action="store_true",
                     help="ไม่ใช้ per-class threshold จาก thresholds.json")
+    ap.add_argument("--weights", default=None,
+                    help="Stage 2 .pt (ไม่ระบุ = ใช้ STAGE2_MODEL_PATH ใน pipeline.py = เล่มจบ train-gray-n2)")
+    ap.add_argument("--thresholds", default=None,
+                    help="ไฟล์ per-class conf (ไม่ระบุ = thresholds.json ของเล่มจบ) — "
+                         "วัดรุ่นเดโม: --weights runs/detect/train-real1/weights/best.pt "
+                         "--thresholds thresholds_demo.json")
     ap.add_argument("--out", default=str(BASE_DIR / "real_test_results.json"))
     args = ap.parse_args()
+
+    if args.weights:
+        P.STAGE2_MODEL_PATH = Path(args.weights)
 
     root = Path(args.dir)
     img_dir = root / "images"
@@ -187,11 +202,15 @@ def main():
     s1, s2 = P.load_models(device)
     gt_used = {p.name: gt_map[p.name] for p in images}
 
-    class_conf = None if args.no_class_conf else P.load_class_conf()
+    class_conf = None if args.no_class_conf else P.load_class_conf(args.thresholds)
     if class_conf:
-        print("ใช้ per-class conf: " + ", ".join(f"{k}={v}" for k, v in class_conf.items()))
+        src = Path(args.thresholds).name if args.thresholds else P.THRESHOLDS_PATH.name
+        print(f"ใช้ per-class conf ({src}): "
+              + ", ".join(f"{k}={v}" for k, v in class_conf.items()))
 
     report = {"device": device, "conf": args.conf, "n_images": len(images),
+              "weights": str(P.STAGE2_MODEL_PATH),
+              "thresholds": args.thresholds or str(P.THRESHOLDS_PATH),
               "per_class_conf": class_conf}
 
     if args.mode in ("pipeline", "both"):

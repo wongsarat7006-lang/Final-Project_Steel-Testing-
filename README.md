@@ -4,8 +4,9 @@
 
 | Stage | หน้าที่ | โมเดล |
 |-------|---------|-------|
+| **0. Steel Gate** (เดโมเท่านั้น, advisory) | จำแนก "เหล็ก / ไม่เหล็ก" — เตือนเมื่อภาพอาจไม่ใช่พื้นผิวเหล็ก | YOLO11n-cls (`steel_gate.py` / `train-gate`) |
 | **1. Metal Localization** | หา region ในภาพที่เป็นวัสดุ "เหล็ก/โลหะ" แล้ว crop ออกมา | [DMS46](https://github.com/apple/ml-dms-dataset) (Apple Dense Material Segmentation, pre-trained, TorchScript) |
-| **2. Defect Detection** | ตรวจชนิดตำหนิบนภาพที่ crop มา 8 ประเภท | YOLO11s (เทรนเองบน dataset รวม, grayscale — `train-gray-s`) |
+| **2. Defect Detection** | ตรวจชนิดตำหนิบนภาพที่ crop มา 8 ประเภท | YOLO11n (เทรนเองบน dataset รวม) |
 
 ```
 ภาพถ่าย ──▶ [Stage 1: DMS46] ──▶ mask พื้นที่เหล็ก ──▶ crop
@@ -14,6 +15,15 @@
 ```
 
 โปรเจคนี้ใช้คู่กับ repo `ml-dms-dataset` (โค้ดต้นฉบับของ Stage 1) — ไฟล์โมเดล `DMS46_v1.pt` ถูก copy มาไว้ใน repo นี้แล้ว
+
+### 2 ราง โมเดล Stage 2 (แยกกันชัด)
+
+| ราง | โมเดล | เทรนจาก | ใช้ที่ไหน |
+|---|---|---|---|
+| **เล่มจบ / benchmark** | `train-gray-n2` (grayscale) | NEU-DET + Roboflow (แล็บ) | ค่า default ของ `pipeline.py` / `evaluate.py` · ตัวเลขในภาคนิพนธ์ · `thresholds.json` |
+| **เดโม / product** | `train-real1` (RGB) | + 672 ภาพ corrosion ถ่ายจริง | ค่า default ในหน้า `app.py` · `thresholds_demo.json` |
+
+> โมเดลเล่มจบ mAP50 บน benchmark สูง (0.867) แต่ **transfer ≈ 0 บนภาพถ่ายจริง** (domain gap) — โมเดลเดโมจับสนิมบนภาพจริงได้ (rust recall 8/12) แลกกับ benchmark ที่ต่ำกว่า ดูหัวข้อ "ราง product / เดโม" และ "Pipeline end-to-end vs Baseline"
 
 ---
 
@@ -36,48 +46,77 @@
 
 ```
 steel-defect-detection/
+│
+│  ── แกนระบบตรวจจับ ──
 ├── DMS46_v1.pt              โมเดล Stage 1 (TorchScript)
-├── pipeline.py              รัน pipeline 2-stage เต็มระบบ  ← ไฟล์หลัก
-├── train.py                 เทรนโมเดล Stage 2  (มี --recipe {default,texture})
-├── evaluate.py              วัดผลบน test split (Stage 2 mAP / pipeline image-level)
-├── evaluate_real.py         วัดผลบนภาพเหล็กถ่ายจริง — เทียบ pipeline vs baseline (ไม่มี Stage 1)
-├── evaluate_stage1.py       วัด Stage 1 (DMS46) เชิงตัวเลข: detection rate / coverage / เวลา
-├── merge_datasets.py        รวม NEU + Rust + Crack เป็น 8 คลาส
-├── resplit_dataset.py       แบ่ง train/valid/test ใหม่แบบ stratified (ทุก split ครบ 8 คลาส)
-├── fix_labels.py            [accuracy] รวมกล่อง crazing/rolled-in เป็น 1/ภาพ + ตัดกล่องเสีย
-├── make_grayscale_dataset.py [accuracy] merged_dataset/ → merged_dataset_gray/ (ตัด shortcut สี)
-├── make_oversampled_list.py class-balanced oversampling (มี --dataset) → <ds>/train_oversampled.txt
-├── tune_thresholds.py       [accuracy] หา per-class confidence จาก val → thresholds.json
-├── make_figures.py          สร้างรูปประกอบรายงานลง figures/
-├── make_diagrams_doc.py     สร้าง docs/system_diagrams.docx (ไดอาแกรมสถาปัตยกรรม 5 รูป)
-├── make_uml_doc.py          สร้าง docs/uml_sa_diagrams.docx (UML/SA 10 รูป: use case, C4, ERD, sequence, ...)
-├── make_design_doc.py       สร้าง docs/design_document.docx (FR/NFR, architecture, data design, UI/UX, flowchart)
+├── pipeline.py              รัน pipeline 2-stage เต็มระบบ  ← ไฟล์หลัก (build_regions / run_stage1 / run_stage2 / cross_region_nms)
+├── steel_gate.py            Stage 0 — classifier เหล็ก/ไม่เหล็ก (advisory, เดโมเท่านั้น)
+├── app.py                   Prototype UI (Gradio) — 3 แท็บ: อัปโหลด / ถ่ายภาพ / เรียลไทม์
+├── train.py                 เทรนโมเดล Stage 2  (--recipe {default,texture,camera,domainrand})
+├── train_gate.py            เทรน Stage 0  (--recipe เดียว, yolo11n-cls)
+├── run_round.py             รัน active-learning 1 รอบ (import → merge → train → eval)
 ├── test_smoke.py            smoke test — รัน pipeline 1 ภาพ + เช็คโครง output (กัน regression)
-├── app.py                   Prototype UI (Gradio)
-├── prepare_data.md          ขั้นตอนเตรียม dataset ตั้งแต่ต้น (reproducibility)
-├── data.yaml                config 6 คลาส NEU เดิม
-├── data_oversampled.yaml    config 8 คลาส, train ชี้ไฟล์ oversampled list
-├── thresholds.json          per-class conf (มีก็ใช้อัตโนมัติใน pipeline/app/evaluate_real)
-├── results/                 ผล eval ที่เก็บไว้ (JSON) — ดู results/README.md
-├── merged_dataset/          8 คลาส — labels_raw/ = label ก่อน fix_labels.py
-│   ├── data.yaml            config 8 คลาส  ← ใช้เทรน baseline
-│   └── {train,valid,test}/{images,labels}/
-├── merged_dataset_gray/     เวอร์ชัน grayscale (สร้างจาก make_grayscale_dataset.py)
-├── train/ valid/ test/      NEU ดิบจาก Roboflow (source ของ merge_datasets.py — ห้ามลบ)
-├── rust_dataset/  crack_dataset/            dataset ดิบก่อน merge
-├── real_test/               ★ ต้องสร้างเอง — ภาพเหล็กถ่ายจริง + labels.csv (ดู prepare_data.md ข้อ 6)
-├── runs/detect/
-│   ├── train/               เทรนครั้งแรก 6 คลาส (30 epochs)
-│   ├── train-2/             เทรน 8 คลาส บน dataset ที่ยังปนเปื้อน (50 epochs)
-│   ├── train-clean/         เทรน 8 คลาส dataset สะอาด, augmentation default (baseline)
-│   ├── train-balanced/      เทรน 8 คลาส + oversampling + recipe texture (yolo11n)
-│   └── train-gray-s/        yolo11s + label สะอาด + grayscale (Tier 1+2)  ← pipeline ใช้ best.pt ตัวนี้
-├── figures/                 รูปประกอบรายงาน (generate ได้เอง)
-├── test_images/             ภาพตัวอย่างเล่น ๆ สำหรับ demo pipeline
-└── pipeline_results/        ผลลัพธ์ (generate ได้เอง)
+│
+│  ── วัดผล ──
+├── evaluate.py              วัดผลบน test split (Stage 2 mAP / pipeline image-level)
+├── evaluate_real.py         วัดผลบนภาพเหล็กถ่ายจริง — pipeline vs baseline (--weights / --thresholds เลือกรางได้)
+├── evaluate_stage1.py       วัด Stage 1 (DMS46) เชิงตัวเลข: detection rate / coverage / เวลา
+├── evaluate_cross_dataset.py วัด generalization ข้ามชุด (GC10-DET)
+├── tune_thresholds.py       หา per-class confidence จาก val → thresholds*.json
+├── aggregate_seeds.py       รวมผล multi-seed → mean ± std
+├── check_leakage.py         ตรวจ train/test leakage (perceptual hash + pixel cosine)
+├── make_figures.py          สร้างรูปประกอบรายงานลง figures/
+│
+│  ── เตรียมข้อมูล ──
+├── merge_datasets.py        รวม NEU + Rust + Crack เป็น 8 คลาส
+├── resplit_grouped.py       group-aware stratified re-split (แก้ leakage — ตัวที่ใช้จริง)
+├── resplit_dataset.py       re-split เดิม (ก่อนพบ leakage — เก็บไว้อ้างอิง)
+├── fix_labels.py            รวมกล่อง crazing/rolled-in เป็น 1/ภาพ + ตัดกล่องเสีย
+├── make_grayscale_dataset.py  merged_dataset/ → merged_dataset_gray/ (ตัด shortcut สี)
+├── make_oversampled_list.py  class-balanced oversampling (--dataset) → <ds>/train_oversampled.txt
+├── make_gate_dataset.py     สร้าง dataset เหล็ก/ไม่เหล็ก สำหรับ Stage 0
+├── import_labeled.py        import ภาพ labeled จาก Roboflow/โฟลเดอร์ (active-learning)
+├── annotate_bootstrap.py    ช่วย pre-annotate ภาพใหม่ด้วยโมเดลปัจจุบัน
+│
+│  ── config ──
+├── data.yaml / data_oversampled.yaml   config dataset (6 คลาส NEU เดิม / 8 คลาส oversampled)
+├── thresholds.json         per-class conf — ราง เล่มจบ (train-gray-n2)
+├── thresholds_demo.json    per-class conf — ราง เดโม (train-real1)
+├── thresholds_real2.json   per-class conf — train-real2 (round 2)
+│
+│  ── เอกสาร / โน้ต ──
+├── NEXT_STEPS.md            runbook + สถานะงาน + ผลการทดลองล่าสุด
+├── thesis_notes.md          use case, Stage 1 = negative ablation, ผลรายรอบ
+├── prepare_data.md          ขั้นตอนเตรียม dataset ตั้งแต่ raw source (reproducibility)
+├── cross_dataset_eval.md / literature_comparison.md   ผล GC10 / เทียบเปเปอร์ NEU-DET
+├── DATA_COLLECTION.md / SHOOTING_GUIDE.md   ราง product: เก็บภาพถ่ายจริงยังไง
+├── make_thesis_doc.py + thesis_content.py   generate ภาคนิพนธ์ บท 1–3 (.docx)
+├── make_ui_doc.py / make_uml_doc.py / make_design_doc.py / make_diagrams_doc.py /
+│   make_database_doc.py / make_error_analysis_doc.py / make_combined_doc.py
+│                            generate เอกสารประกอบเล่ม (.docx — ไม่เก็บใน git, รันสร้างใหม่ได้)
+│
+│  ── data / artifacts (gitignored — สร้างใหม่ได้) ──
+├── merged_dataset/          8 คลาส RGB — labels_raw/ = label ก่อน fix_labels.py
+├── merged_dataset_gray/     เวอร์ชัน grayscale (make_grayscale_dataset.py)
+├── dataset_real/ dataset_gate/ downloads/   ข้อมูลราง product / Stage 0
+├── train/ valid/ test/      NEU ดิบจาก Roboflow (source ของ merge_datasets.py)
+├── rust_dataset/ crack_dataset/   dataset ดิบก่อน merge
+├── real_test/               ภาพเหล็กถ่ายจริง 18 ภาพ + labels.csv (images/ tracked, ดู SOURCES.md)
+├── test_images/             ภาพตัวอย่าง 8 คลาส + normal (ใช้ใน demo / smoke test — tracked)
+├── external_test/gc10/      GC10-DET สำหรับ cross-dataset eval
+├── runs/detect/             weights (เทรนใหม่ได้จาก train.py)
+│   ├── train-gray-n2/  + -s{1,2,3}/   ราง เล่มจบ, yolo11n grayscale — multi-seed n=4  ← pipeline.py default
+│   ├── train-gray-s2/                 yolo11s (model-size ablation)
+│   ├── train-real1/  train-real2/     ราง เดโม — + ภาพถ่ายจริง (round 1 / round 2)
+│   ├── train-dr/                      domain randomization (negative result)
+│   ├── train-clean/  train-balanced/  baseline เดิม (ก่อนแก้ leakage)
+│   └── train-gate/                    Stage 0
+├── figures/ results/ pipeline_results/   รูป + ผล eval (JSON) — generate ได้เอง
+└── weights/                yolo11*.pt ที่ดาวน์โหลดมา
 ```
 
 ขั้นตอนเตรียมข้อมูลแบบละเอียด (raw source → merge → resplit → oversample) อยู่ใน **`prepare_data.md`**
+สถานะงานล่าสุด + ผลการทดลองรายรอบ อยู่ใน **`NEXT_STEPS.md`**
 
 ---
 
@@ -104,14 +143,14 @@ pip install -r requirements.txt
 
 ```bash
 # ภาพเดียว
-python pipeline.py --image test_images/steel-plate3.jpg
+python pipeline.py --image test_images/rust_example.jpg
 
 # ทั้งโฟลเดอร์
 python pipeline.py --folder test_images --output_dir pipeline_results
 
 # ปรับ threshold / บังคับใช้ CPU / เลือกโมเดล Stage 2
 python pipeline.py --image a.jpg --conf 0.35 --device cpu
-python pipeline.py --image a.jpg --weights runs/detect/train-gray-s/weights/best.pt
+python pipeline.py --image a.jpg --weights runs/detect/train-gray-n2/weights/best.pt
 ```
 ถ้ามี `thresholds.json` (จาก `tune_thresholds.py`) pipeline จะใช้ per-class conf อัตโนมัติ — ปิดด้วย `--no-class-conf`
 
@@ -173,19 +212,73 @@ python make_figures.py --runs train-clean train-balanced \
 
 ```bash
 pip install gradio
-python app.py
-# เปิด http://127.0.0.1:7860 — อัปโหลดภาพ, เลื่อน confidence, กดตรวจสอบ
+python app.py                 # http://127.0.0.1:7860 + วง LAN เดียวกัน
+python app.py --share         # + ลิงก์สาธารณะ *.gradio.live (จำเป็นถ้าจะถ่ายจากกล้องมือถือ — ต้อง https)
+python app.py --local-only    # เปิดเฉพาะเครื่องนี้
 ```
 
-- โหลดโมเดลครั้งเดียวตอนเริ่ม (ครั้งแรกอาจใช้เวลา ~10–20 วิ) แล้วพร้อมรับภาพ
-- แสดง 3 ส่วน: สรุปผล (ชนิดตำหนิ + เน้นความเสี่ยงสูง), ภาพผลลัพธ์ (กรอบเหล็ก + กรอบตำหนิ),
-  ภาพ Stage 1 (พื้นที่ที่เป็นเหล็ก / fallback ทั้งภาพ)
+- warm ทุกโมเดลตอนเริ่ม แล้วสลับในหน้าจอได้ไม่ต้องรอโหลด
+- **3 แท็บรับภาพ:** อัปโหลด/วาง · ถ่ายจากกล้อง · เรียลไทม์ (ทดลอง — YOLO บนสตรีมเฟรม ข้าม Stage 1)
+- **ตัวเลือกขั้นสูง:** เลือกโมเดล Stage 2 (เดโม `train-real1` / round 2 `train-real2` / เล่มจบ `train-gray-n2`) ·
+  โหมดความไว (มาตรฐาน/ไว/ไวมาก — "ไว/ไวมาก" ลด threshold แต่ผลที่ผ่านเพราะเหตุนี้ขึ้นเป็น "อาจมี" เท่านั้น
+  ไม่ขึ้น "ความเสี่ยงสูง") · ตรวจละเอียด (TTA) · Stage 0 gate · ตรวจหลายสเกล + ตัดไทล์
+- แสดง: การ์ดสรุปผล + ตารางรายการตำหนิ (เรียงตามความเสี่ยง) + ภาพผลลัพธ์ + ภาพ Stage 1 · ดาวน์โหลดผล (zip) + เก็บ feedback ลง `demo_logs/`
 - ใช้ fallback + cross-region NMS แบบเดียวกับ `pipeline.py` (`pipeline.build_regions`)
-- ติ๊ก "ตรวจละเอียด" = test-time augmentation (ช้าลง ~2–3x, recall ดีขึ้นเล็กน้อย)
+
+---
+
+## ราง product / เดโม (แยกจากเล่มจบ)
+
+โมเดลเล่มจบเทรนบน NEU-DET (แล็บ, close-up, grayscale) → **ไม่ transfer ไปภาพถ่ายจริง** ราง product
+พยายามปิดช่องว่างนี้ (ผล + runbook เต็มใน `NEXT_STEPS.md` / `DATA_COLLECTION.md`):
+
+| ความพยายาม | ผล |
+|---|---|
+| **`train-real1`** (round 1) — config เล่มจบ (RGB) + 672 ภาพ corrosion ถ่ายจริง | ✅ ใช้เป็น default ในเดโม — rust recall บนภาพจริง 0/12 → **8/12**, micro-F1 0.067 → **0.50** |
+| **`train-real2`** (round 2) — + 1022 ภาพสนิม scene จริง | ⚠️ conf บนสนิม scene สูงขึ้น แต่ **regress บนสนิม lab-crop** — เป็น "รุ่นทดลอง" ไม่ใช่ default |
+| **`train-dr`** — domain randomization (aug แรงสุด) | ❌ **negative result** — lab mAP50 ตกเหลือ 0.777, ไม่ช่วยภาพจริง (ไม่มีข้อมูล = aug สร้างความรู้ใหม่ไม่ได้) |
+| **Stage 0 gate** (`steel_gate.py`) — classifier เหล็ก/ไม่เหล็ก | ⚠️ overfit ไป lab domain — ใช้แบบ **advisory** เท่านั้น (แปะหมายเหตุ ไม่ veto) |
+
+**รากปัญหาที่เหลือ:** ไม่มีภาพถ่ายจริงของ 6 คลาส texture (crazing/inclusion/pitted/rolled-in/scratches + crack บนชิ้นงานจริง) — เดโมจึงใช้ได้จริงเฉพาะ **สนิม**
 
 ---
 
 ## ผลการทดลอง
+
+> ### ⚠️ อัปเดต 2026-09-06 — Data leakage audit + retrain + multi-seed
+>
+> **1) Leakage:** `check_leakage.py` (perceptual hash + pixel cosine) พบชุด Roboflow
+> "Danger-Rust" เป็นภาพถ่ายรัว → split เดิมสุ่มแยกเฟรมติดกันคนละ split →
+> **rust ใน valid 100% / test 98% มีภาพเกือบเหมือนอยู่ใน train** (932 คู่)
+> แก้ด้วย `resplit_grouped.py` (group-aware re-split, 80/10/10 → 3338/422/425, leakage = 0)
+>
+> **2) โมเดลหลักเปลี่ยนเป็น `train-gray-n2` (YOLO11n)** — เล็กกว่า 4x (5.5 MB), เร็วกว่า 2x (~5 ms),
+> และ mAP สูงกว่า YOLO11s:
+>
+> | โมเดล (split สะอาด) | test mAP50 | mAP50-95 | หมายเหตุ |
+> |---|---|---|---|
+> | `train-gray-n2` (yolo11n) — **pipeline ใช้ตัวนี้** | **0.867 ± 0.010** | 0.536 ± 0.009 | multi-seed n=4 |
+> | `train-gray-s2` (yolo11s) | 0.840 | 0.525 | single run (ต่ำกว่า n2 ~2.7σ) |
+>
+> **3) Multi-seed** (`aggregate_seeds.py`, n=4) — รายคลาส mAP50 (mean ± std):
+>
+> | class | mAP50 | recall | | class | mAP50 | recall |
+> |---|---|---|---|---|---|---|
+> | rust | 0.995 ± 0.00 | 1.00 | | pitted_surface | 0.803 ± 0.025 | 0.756 |
+> | patches | 0.961 ± 0.011 | 0.895 | | rolled-in_scale | 0.819 ± 0.048 | 0.725 |
+> | scratches | 0.947 ± 0.016 | 0.897 | | crazing | 0.867 ± 0.054 | 0.806 |
+> | inclusion | 0.856 ± 0.016 | 0.789 | | **crack** | **0.687 ± 0.011** | **0.606** |
+>
+> **อ่านผล:** overall mAP50 0.853 (เดิม, leaky) → 0.867 ± 0.010 (n2, สะอาด) — ตัวเลขเดิมไม่ได้ผิดมาก
+> และตอนนี้ป้องกันได้ · rust 0.995 คงที่ทุก seed แต่เพราะ subset rust เป็นกลุ่ม homogeneous
+> แยกจาก NEU ง่าย (ดู `cross_dataset_eval.md` + error analysis EA-4 ใน `make_error_analysis_doc.py`) ไม่ใช่ leakage แล้ว ·
+> **yolo11n > yolo11s → model size ไม่ใช่ปัจจัยหลัก** (เกนมาจาก label สะอาด + grayscale) ·
+> crack อ่อนสุดและ crazing/rolled-in_scale std สูง (ไม่เสถียรข้าม seed)
+>
+> `thresholds.json` recompute สำหรับ n2: macro-F1 val 0.824 → 0.844
+>
+> หัวข้อย่อยด้านล่างที่อ้าง `train-gray-s` / `train-gray-n` (ไม่มี "2") เป็นตัวเลข **ก่อนแก้ leakage**
+> เก็บไว้เทียบ before/after — ตัวเลข canonical ให้ยึดตารางนี้
 
 ### Stage 2 — YOLO11n, 8 คลาส, dataset สะอาด (`runs/detect/train-clean`)
 
@@ -265,7 +358,7 @@ python app.py
 
 **สรุป:** สำหรับงานตรวจตำหนิ (พลาดตำหนิ = แย่กว่าเตือนเกิน) recall ที่สมดุลขึ้นคุ้มกว่า mAP ที่ขยับนิด
 → train-balanced ดีกว่า train-clean. **ขั้นต่อไป (Tier 1+2) ดันได้อีกมาก — ดูหัวข้อ "Tier 1+2" ด้านล่าง**
-(โมเดลหลักปัจจุบัน = `train-gray-s`, `pipeline.py` ชี้ตัวนี้แล้ว)
+(โมเดลหลักปัจจุบัน = `train-gray-n2` หลังแก้ leakage + multi-seed, `pipeline.py` ชี้ตัวนี้แล้ว — ดูกล่อง ⚠️ ด้านบน)
 
 ### ตารางเปรียบเทียบ
 
@@ -361,10 +454,27 @@ val mAP50 = 0.854 ≈ test 0.853 → ไม่ overfit
 python evaluate_real.py           # pipeline (Stage 1 + Stage 2) vs baseline (YOLO ภาพเต็ม)
 ```
 
-| | micro-P | micro-R | micro-F1 | macro-F1 | sec/img |
-|---|---|---|---|---|---|
-| Pipeline (2-stage) | _?_ | _?_ | _?_ | _?_ | _?_ |
-| Baseline (ไม่มี Stage 1) | _?_ | _?_ | _?_ | _?_ | _?_ |
+วัดบน `real_test/` **18 ภาพถ่ายจริงระดับ scene** (ดึงจากเน็ต — ข้อจำกัดของชุด ดู `real_test/SOURCES.md`:
+เอียงไป rust, ไม่มี inclusion/rolled-in_scale/crazing) — image-level P/R/F1:
+
+| โมเดล Stage 2 | | micro-P | micro-R | micro-F1 | macro-F1 | sec/img |
+|---|---|---|---|---|---|---|
+| `train-gray-n2` (เล่มจบ) | Pipeline (2-stage) | 0.143 | 0.043 | 0.067 | 0.057 | 0.56 |
+| `train-gray-n2` (เล่มจบ) | Baseline (ไม่มี Stage 1) | 0.333 | 0.043 | 0.077 | 0.067 | 0.04 |
+| `train-real1` (เดโม default) | Pipeline (2-stage) | 0.692 | 0.391 | 0.500 | 0.219 | 0.35 |
+| `train-real1` (เดโม default) | Baseline (ไม่มี Stage 1) | 0.750 | 0.391 | 0.514 | 0.226 | 0.03 |
+
+> วัดรุ่นเดโม: `python evaluate_real.py --weights runs/detect/train-real1/weights/best.pt --thresholds thresholds_demo.json`
+
+**อ่านผล:**
+- โมเดลเล่มจบ (`train-gray-n2`, grayscale + NEU benchmark) **แทบไม่ยิงบนภาพถ่ายจริงเลย** (micro-R 0.043,
+  rust 0/12 เพราะ conf 0.92 จาก val แล็บกรองทิ้งหมด) — สอดคล้องกับ cross-dataset GC10-DET ที่ transfer ≈ 0
+  → เป็นหลักฐาน **domain gap** ตรง ๆ ไม่ใช่จุดบกพร่องของสถาปัตยกรรม
+- ราง เดโม (`train-real1` = config เดิม + 672 ภาพ corrosion จริง, RGB): rust recall **0/12 → 8/12**,
+  micro-F1 0.067 → 0.50 — ยืนยันว่า **ต้องมีภาพในโดเมนเข้าชุดเทรน** ถึงจะใช้งานบนภาพจริงได้ (ดู `DATA_COLLECTION.md`)
+- **Stage 1 ไม่ช่วย** แม้บนภาพ scene จริง: `stage1_metal_found_rate` 0.56 (ดีกว่าบน crop แล็บ 0.35)
+  แต่ pipeline micro-P **ต่ำกว่า** baseline ทั้งสองโมเดล (fallback + กรอบ metal เพี้ยนเพิ่ม FP)
+  → conclusion เป็น **negative ablation** ตามที่ตั้งไว้ใน `thesis_notes.md` ข้อ 2
 
 ### Stage 1 (DMS46) — metric เชิงตัวเลข (`evaluate_stage1.py`)
 
@@ -380,8 +490,8 @@ python evaluate_real.py           # pipeline (Stage 1 + Stage 2) vs baseline (YO
 | gt_area_kept_mean | **0.163** | ถ้าไม่ fallback กรอบ metal จะตัดตำหนิจริงทิ้ง ~84% |
 | stage1_ms (mean / median) | 208 / 228 ms (GPU) | ต้นทุนเวลาที่จ่ายเพิ่มต่อภาพ |
 
-เทียบกับภาพถ่ายจริงระดับ scene (`test_images/`): DMS46 ตรวจเจอเหล็ก 24–82% ของภาพ
-(`images.jpg` 74%, `steel-plate3.jpg` 82%)
+เทียบกับภาพถ่ายจริงระดับ scene (`real_test/`): DMS46 ตรวจเจอเหล็กบ่อยขึ้น (`metal_found_rate` 0.56)
+แต่ยังตกไป fallback เป็นส่วนใหญ่ — ดูหัวข้อ "Pipeline end-to-end vs Baseline"
 
 > **สรุป:** DMS46 ทำงานเฉพาะกับภาพที่มี "บริบทฉาก" (วัตถุเหล็กอยู่ในภาพร่วมกับพื้นหลัง)
 > บน close-up texture patch มันแยกไม่ออกว่าเป็นเหล็ก → ตัวเลข mAP ทั้งหมดใน `merged_dataset`
@@ -438,11 +548,20 @@ python evaluate.py --mode stage2   # วัดผลซ้ำ
    segmentation ระดับฉาก ต้องมีบริบทพื้นหลัง. บน close-up texture patch (merged_dataset test
    416 ภาพ) `evaluate_stage1.py` ได้ fallback 78%, gt_area_kept 16% →
    ตัวเลข mAP บน `merged_dataset` เป็น Stage 2 ล้วน ไม่สะท้อนทั้งระบบ
-4. **ค่าของ Stage 1 ยังพิสูจน์ไม่ได้เชิงบวก** — `evaluate_stage1.py` แสดงว่ามันไม่ทำงาน
-   บนชุด benchmark; ต้องมี `real_test/` (ภาพถ่ายจริง) เพื่อวัดว่าช่วยตัด false positive
-   จากพื้นหลังที่ไม่ใช่เหล็กได้จริงหรือไม่
-5. **crazing ยังเป็นคลาสที่ยากที่สุด** แม้หลังปรับปรุง — เป็นข้อจำกัดที่พบใน literature ของ NEU-DET เช่นกัน
-6. รันทดลอง seed เดียว (seed=0) ยังไม่มีช่วงความเชื่อมั่น
+4. **Stage 1 (DMS46) ไม่ช่วยเชิงบวก — สรุปเป็น negative ablation** — บน `merged_dataset` test
+   `evaluate_stage1.py` = fallback 78%; บน `real_test/` 18 ภาพ scene จริง Stage 1 ทำงานบ่อยขึ้น
+   (metal_found_rate 0.56) แต่ pipeline micro-P **ต่ำกว่า** baseline ทั้งสองโมเดล
+   → material segmentation ระดับฉากไม่ใช่ front-end ที่เหมาะกับโดเมนนี้; classifier เหล็ก/ไม่เหล็ก
+   ตัวเล็กที่ fine-tune เองน่าจะเหมาะกว่า (future work)
+5. **crack เป็นคลาสที่อ่อนที่สุด** — test mAP50 **0.687 ± 0.011**, recall **0.61** (n=4).
+   สาเหตุ: (ก) มาจาก `crack_dataset` แหล่งเดียว annotate เป็น polygon → bbox หลวม
+   (ข) เป็นตำหนิที่บางที่สุด grayscale ยิ่งลด contrast ของขอบรอย
+   (ค) ภาพ crack ในโดเมนจริงมีสเกล/พื้นผิวหลากหลายกว่าคลาส NEU มาก
+   สำหรับ prototype คัดกรอง recall 0.61 ยังใช้ได้ (คนตรวจซ้ำอยู่แล้ว) แต่เป็นจุดที่ต้องเพิ่มข้อมูลก่อนใช้จริง
+6. **crazing ยังเป็นคลาส texture ที่ยากสุด** (std ข้าม seed ~0.05) — สอดคล้องกับ literature ของ NEU-DET
+7. **domain gap รุนแรงบนภาพถ่ายจริง** — โมเดลเล่มจบ (`train-gray-n2`) บน `real_test/` micro-R 0.043,
+   rust 0/12 — grayscale + benchmark แล็บทำให้ transfer ≈ 0 (ตรงกับ cross-dataset GC10)
+   ต้องมีภาพในโดเมนเข้าชุดเทรน (ราง active-learning ใน `DATA_COLLECTION.md`) ถึงจะใช้งานภาพจริงได้
 
 ---
 

@@ -1,5 +1,102 @@
 # งานที่เหลือ — runbook
 
+> **สถานะ 2026-09-07:** multi-seed (n=4), leakage fix, real_test (18 ภาพ), Stage 1 ablation — **เสร็จหมด**
+> เหลืองานเดียวที่เป็น blocker เล่มจบ: **เคลียร์ baseline กับอาจารย์** (ขั้น 4 ข้อ 3)
+> ที่เหลือเป็น optional: ขยาย real_test ให้ครบคลาส + เติม URL, และราง product (`DATA_COLLECTION.md`)
+> รายละเอียดผลล่าสุดอยู่ใน `thesis_notes.md` (ตารางท้ายไฟล์) และ README หัวข้อ "Pipeline end-to-end vs Baseline"
+
+---
+
+## ราง product/เดโม — generalization + Stage 0 steel gate (2026-09-07)
+
+**เป้า:** (a) ตรวจภาพเหล็กที่ไม่เคยเห็นได้ดีขึ้น (b) ภาพที่ไม่มีเหล็ก → ตอบ "ไม่พบพื้นผิวเหล็ก"
+
+**ลองแล้วไม่เวิร์ก:** YOLO-World / COCO / DMS46 histogram zero-shot — ทั้งหมด noise ในโดเมนนี้
+
+**ทำไปแล้ว — Stage 0 classifier "เหล็ก/ไม่เหล็ก"** (`make_gate_dataset.py` → `train_gate.py` → `steel_gate.py`):
+- yolo11n-cls, positive = merged steel (ตัด crack_ = คอนกรีต), negative = DTD + Imagenette + คอนกรีต
+- val top-1 0.998 แต่ **หลอกตา** — DTD/Imagenette แยกจาก lab crop ง่ายเกิน
+- ของจริง: **overfit ไป lab domain** — ภาพเหล็ก scene จริง (เหล็กเส้น/ประตูสนิม) ได้ P(เหล็ก) 0.00–0.25
+- `app.py` ใช้แบบ **advisory** — gate + DMS46 + Stage 2 เงียบพร้อมกัน = แปะหมายเหตุ "อาจไม่ใช่พื้นผิวเหล็ก"
+  ใต้การ์ด "ไม่พบตำหนิพื้นผิว" (2026-09-08: เดิมเป็น headline "ไม่พบพื้นผิวเหล็ก" — ฟันธงผิดกับ
+  real_005/009/014/018 ซึ่งเป็นเหล็กสนิมจริง เพราะ gate+DMS46 ให้ ~0 กับเหล็กผุเหมือนภาพไม่ใช่เหล็ก)
+- จับได้: เอกสาร/สัตว์/ปูนฉาบ + ~ครึ่งของภาพสุ่ม ; จับไม่ได้: ภาพไม่ใช่เหล็กที่ Stage 2 หลอนว่าเจอตำหนิ
+
+**ขั้นต่อไปถ้าจะให้ gate ใช้ได้จริง:** เก็บภาพ "เหล็ก/โลหะ scene จริง" ~600 ภาพจากเน็ต
+(เหล็กเส้น, ท่อ, รั้ว, แผ่น, เครื่องมือ, สนิม — สไตล์เดียวกับ `import_labeled.py` round1)
+ใส่เป็น positive แล้ว `python make_gate_dataset.py && python train_gate.py` ใหม่
+→ รากปัญหาเดียวกับทั้งโปรเจค: **ขาดภาพเหล็กในสภาพใช้งานจริง**
+
+### เดโม — รอบทดสอบ + แก้บั๊ก (2026-09-08)
+ทดสอบ `app.py` กับภาพตัวอย่างทั้งหมด (โมเดล default = train-real1). วิธีวัดรุ่นเดโม:
+```powershell
+python evaluate_real.py --weights runs/detect/train-real1/weights/best.pt `
+                        --thresholds thresholds_demo.json --out results/real_after_round1.json
+```
+(ค่า default ของ `evaluate_real.py` = โมเดลเล่มจบ train-gray-n2 rust conf 0.92 → transfer ~0 บนภาพจริง
+= negative ablation ที่ลงเล่มแล้ว ; เพิ่ม flag `--thresholds` แล้วถึงจะวัดรุ่นเดโมได้)
+
+**ผลรุ่นเดโมบน real_test 18 ภาพ:** rust 8/12 (P .73 R .67) · crack 1/3 · pitted/patches/scratches = 0
+· micro-F1 0.50 ; baseline (ไม่มี Stage 1) เท่าหรือดีกว่าทุก metric + เร็วกว่า 12× → Stage 1 = negative
+
+**บั๊กที่แก้:**
+1. `real_005/009/014/018` (เหล็กสนิมจริง) ขึ้น "ไม่พบพื้นผิวเหล็ก" → ลดเป็นหมายเหตุใต้ "ไม่พบตำหนิ"
+   (gate + DMS46 ให้ ~0 กับเหล็กผุพอ ๆ กับภาพไม่ใช่เหล็ก)
+2. โหมดความไว "ไว/ไวมาก" (×0.6/×0.4 threshold) ทำให้ detection อ่อน ๆ ที่ผ่านเพราะลด threshold
+   ขึ้นเป็น "ยืนยัน" + headline "ความเสี่ยงสูง" ได้ — เช่น `real_015` (ผนังปูน) → crack 0.19 "ความเสี่ยงสูง"
+   → แก้: "ยืนยัน" ต้องผ่าน threshold ที่จูนไว้ (โหมดมาตรฐาน) เท่านั้น ; ที่ผ่านเพราะโหมดความไว = "อาจมี"
+   → sweep พบว่า sensitivity **กู้ตำหนิจริงกลับมาได้ 0 ชิ้น** บน real_test (เพิ่มแต่ FP) — cap ไว้จึงไม่เสียอะไร
+3. multiscale: กู้สนิม +1 ภาพ แลก FP +1 (real_015 plaster crack, patches หลอนบน real_017) — marginal,
+   ถูกแล้วที่ปิด default ไม่ควรดันให้เปิด
+
+**ยังพลาด (แก้ที่ app.py ไม่ได้ — ต้องมีข้อมูลจริง):** patches/pitted_surface/scratches/crack บนภาพถ่ายจริง
+· `real_002` scratches→rust, `real_013/017` crack→rust (weld crack) — โมเดลสับสนคลาส ไม่ใช่แค่ threshold
+· `real_008` (รอยแตกคอนกรีต distractor) → crack 0.71 "ความเสี่ยงสูง" ทุก config (gate P=0 แต่ advisory)
+
+**optional ต่อ:** เก็บภาพ normal steel จริง 10–20 ภาพใส่ `real_test/` — ตอนนี้วัด specificity ไม่ได้
+(มีเหล็กสะอาดจริงแค่ `normal_steel_example.jpg` 1 ภาพ ; distractor 2 ภาพเป็นปูน ไม่ใช่เหล็ก)
+
+### Round 2 — train-real2 (2026-09-07) — ผลปนเป, ยังไม่ใช้เป็น default
+Import 4 dataset ใน `downloads/` (corrosion-detection-sb1, rust-detect-1350, rust-detection-small,
+corrosion-and-cracks) = **1022 ภาพสนิม scene จริง** → `dataset_real/round2` → merge → fine-tune จาก
+train-real1 → **`train-real2`** (OOM ตาย ~epoch 81/100)
+- lab benchmark: mAP50 0.866 — **แต่หลอกตา** (merged test set มี style เดียวกับ round1/round2)
+- real-photo scene rust: conf สูงขึ้น (0.23→0.51, 0.61→0.79) + localize ดีขึ้น
+- **REGRESS บนสนิม lab-crop**: `rust_example.jpg` conf 0.42 → 0.04 (catastrophic-ish forgetting)
+- → `app.py` ยังใช้ **train-real1** เป็น default ("ปรับโดเมน แนะนำ") ; train-real2 = "รุ่นทดลอง scene"
+- `thresholds_real2.json` มี (tune lab val, rust override 0.15)
+- **ยังเป็นสนิมอย่างเดียว** — 6 คลาส texture ไม่มี dataset เปิดแนว scene
+
+**ถ้าจะทำ round 2 ให้ดีจริง:** เทรนแบบ freeze backbone / lr ต่ำ / ผสม lab crop เข้าไปด้วย
+(กัน forgetting) และเทรนให้ครบ epoch ใน terminal เอง
+
+### train-dr — domain randomization recipe (2026-09-07) — ⚠️ ต้องเทรนเองใน terminal
+โค้ดพร้อมแล้ว: `train.py --recipe domainrand` (aug แรงสุด — hsv 0.05/0.9/0.6, scale 0.9,
+perspective/shear, copy_paste 0.3, randaugment, erasing 0.5) + `pipeline.run_stage2_multiscale()`
+(ตรวจ 640/960/1280 + ตัดไทล์ ; checkbox "ตรวจหลายสเกล" ใน app.py แล้ว)
+
+**background training ของ agent โดน OOM kill 3 ครั้ง** (RTX 3050 6GB + เบราว์เซอร์/Claude กิน RAM) —
+`train-dr/best.pt` ตอนนี้ mAP50 แค่ ~0.67 (undertrained ~epoch 20) **อย่าเพิ่งใช้**
+
+**ผล train-dr (เทรนจบ 2026-09-08) — domain randomization ไม่ช่วย (negative result):**
+- lab test mAP50 **0.777** (ตกจาก ~0.86 ของ train-gray-n2/real1/real2) — aug หนักทำ benchmark ตก ~0.09
+  - rolled-in_scale 0.626, crack 0.586 (อ่อนสุด) ; rust ยัง 0.995
+- real_test image-level: **R 0.35 / P 0.53** — ไม่ดีกว่า train-real2 (R 0.39 / P 0.64) แถม FP มากขึ้น
+  - ดีขึ้นนิดเดียว: scratches 1/1 (real1/2 ได้ 0/1) ; แต่ rust ตก 8/12 → 6/12
+- **สรุป:** ยืนยันว่าไม่มีข้อมูลจริงของ 6 คลาส texture → augmentation ยืดได้แค่สิ่งที่มี ไม่สร้างความรู้ใหม่
+- ใช้เป็น ablation เชิงลบในเล่มได้ (อ้าง Mei/Huber 2025) ; `results/stage2_dr.json`
+- **app.py ยังใช้ train-real1 เป็น default** — ไม่เสียบ train-dr
+
+**ทางที่เหลือจริง ๆ ถ้าจะให้ 6 คลาสใช้ได้บนภาพจริง:** ต้องเก็บ+annotate ภาพถ่ายจริงเอง
+(crazing/inclusion/pitted/rolled-in/scratches บนชิ้นงาน/ฉากจริง) — ไม่มีทางลัด
+
+**Round 3 ถ้าจะทำต่อ:** เทรน train-real2 ให้ครบ 100 epoch (รันใน terminal คุณเอง กัน OOM):
+```powershell
+python train.py --recipe camera --data merged_dataset/data_oversampled.yaml `
+                --model runs/detect/train-real1/weights/best.pt --name train-real2 --resume
+```
+หรือหาภาพจริงของ scratches/pitted/crack-on-metal มาเพิ่ม
+
 รันทุกคำสั่งจากโฟลเดอร์ `C:\Users\Lenovo\steel-defect-detection` โดย **activate venv ก่อน**:
 
 ```powershell
@@ -24,26 +121,36 @@ cd C:\Users\Lenovo\steel-defect-detection
 - backup split เดิม: `results/split_manifest_preleakagefix.json`
 - `train_oversampled.txt` regenerate แล้ว (4532 บรรทัด)
 
-**ยังต้องทำ (เรียงลำดับ):**
+**✅ เสร็จแล้ว 2026-09-06:**
+- retrain `train-gray-s2` (yolo11s) + `train-gray-n2` (yolo11n) บน split สะอาด
+- re-eval: `results/stage2_train-gray-{s,n}.json`, `thresholds.json`, `results/stage1_dms46_test.json`,
+  `results/crossdataset_gc10.json` — อัปเดตหมด
+- `pipeline.py` STAGE2_MODEL_PATH → `train-gray-s2` ; `make_figures.py` regenerate ; `test_smoke.py` ผ่าน
+- ภาพตัวอย่าง demo 8 ไฟล์ใน `test_images/` แทนด้วยภาพจาก test split ใหม่
+- README กล่อง ⚠️ + thesis_notes / cross_dataset_eval / literature_comparison / error_analysis อัปเดตแล้ว
+
+**ผลลัพธ์:** overall test mAP50 0.853 → **0.840** (s2) — ตกเล็กน้อย ตัวเลขเดิมเชื่อได้หลังแก้ ;
+`train-gray-n2` 0.867 ≥ s2 → model size ไม่ใช่ปัจจัยหลัก (ยืนยันชัดขึ้น)
+
+**✅ multi-seed (ขั้น 6) — เสร็จแล้ว 2026-09-06:** `results/stage2_multiseed.json` (n=4)
+mAP50 0.867 ± 0.010 ; crack อ่อนสุด 0.687 ± 0.011 ; crazing/rolled-in_scale std ~0.05
+README + thesis_notes ใส่ตาราง mean ± std แล้ว. คำสั่งที่ใช้ (เก็บไว้ทำซ้ำ):
+
 ```powershell
-# 1. retrain 2 โมเดลบน split สะอาด (ข้ามคืน)
-python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
-                --model yolo11s.pt --name train-gray-s2 --epochs 120 --batch 6 --patience 40
-python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
-                --model yolo11n.pt --name train-gray-n2 --epochs 120 --batch 8 --patience 40
+# seed 1,2,3 (seed 0 = train-gray-n2 มีแล้ว)
+foreach ($s in 1,2,3) {
+  python train.py --recipe texture --data merged_dataset_gray/data_oversampled.yaml `
+                  --model yolo11n.pt --name "train-gray-n2-s$s" --epochs 120 --batch 8 --patience 40 --seed $s
+  python evaluate.py --mode stage2 --weights "runs/detect/train-gray-n2-s$s/weights/best.pt" `
+                     --data merged_dataset_gray/data.yaml --out "results/stage2_grayn2_seed$s.json"
+}
+# คัดลอกผล seed 0 ให้ชื่อเข้าชุด
+copy results/stage2_train-gray-n.json results/stage2_grayn2_seed0.json
 
-# 2. วัดผล + threshold ใหม่
-python evaluate.py --mode stage2 --weights runs/detect/train-gray-s2/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-s.json
-python evaluate.py --mode stage2 --weights runs/detect/train-gray-n2/weights/best.pt --data merged_dataset_gray/data.yaml --out results/stage2_train-gray-n.json
-python tune_thresholds.py --weights runs/detect/train-gray-s2/weights/best.pt --data merged_dataset_gray/data.yaml
-python evaluate_stage1.py                       # Stage 1 เชิงตัวเลข (test set ใหม่)
-
-# 3. อัปเดต pipeline.py STAGE2_MODEL_PATH -> train-gray-s2, รูป, README, thesis_notes
-python make_figures.py --runs train-clean train-balanced --evals "train-gray-n:results/stage2_train-gray-n.json" "train-gray-s:results/stage2_train-gray-s.json"
-python test_smoke.py
-
-# 4. แทนภาพตัวอย่าง demo ที่ตอนนี้ตกไปอยู่ train ด้วยภาพจาก test split ใหม่
+# รวมเป็น mean ± std
+python aggregate_seeds.py --glob "results/stage2_grayn2_seed*.json" --out results/stage2_multiseed.json
 ```
+→ `results/stage2_multiseed.json` : mAP50 เป็น mean ± std (n=4) ต่อคลาส — ใส่ตารางในเล่มแทนตัวเลขเดียว
 
 ---
 
@@ -142,9 +249,14 @@ python tune_thresholds.py --weights runs/detect/train-gray-s/weights/best.pt --d
 
 ---
 
-## ขั้น 3 — ชุดทดสอบภาพเหล็กถ่ายจริง (`real_test/`)
+## ขั้น 3 — ชุดทดสอบภาพเหล็กถ่ายจริง (`real_test/`)  — ✅ รอบแรกเสร็จ (18 ภาพ)
 
 **นี่คือสิ่งเดียวที่พิสูจน์ได้ว่า Stage 1 (DMS46) มีประโยชน์จริงหรือควรตัดทิ้ง**
+
+> **สถานะ:** มี 18 ภาพ + labels.csv + `evaluate_real.py` รันแล้ว → ผลอยู่ใน README/`thesis_notes.md`
+> สรุป: Stage 1 = negative ablation ; โมเดลเล่มจบ transfer ≈ 0 บนภาพจริง
+> **optional ต่อ:** ขยายเป็น 40–60 ภาพให้ครบ 8 คลาส (ยังขาด inclusion/rolled-in_scale/crazing สิ้นเชิง)
+> + เติม URL ต้นทางทุกภาพลง `real_test/SOURCES.md` ก่อนอ้างในเล่ม
 
 ### 3.1 โฟลเดอร์
 `real_test\images\` + `real_test\labels.csv` (header) มีให้แล้ว — ดู `real_test\README.md`
@@ -207,8 +319,15 @@ python evaluate_real.py            # ทำทั้ง pipeline + baseline แ�
 
 ## สรุปสิ่งที่ต้องส่งกลับมา
 
-| จากขั้น | ไฟล์ | ผมจะทำต่อ |
+| จากขั้น | ไฟล์ | สถานะ |
 |---|---|---|
-| 1 | `results/stage2_train-gray-s.json` + `thresholds.json` + เลข mAP | เติมตารางเทียบใน README (Tier 1/2), รัน make_figures |
-| 3 | `real_test_results.json` | เติมตาราง Pipeline vs Baseline, confusion เทียบ |
-| 4 | คำตอบ 3 ข้อ | เขียนบทสรุป + ปรับ Limitations / ablation section |
+| 1 | `results/stage2_train-gray-*.json` + `thresholds.json` + multiseed | ✅ README/thesis_notes อัปเดตแล้ว |
+| 3 | `results/real_before_round1.json` / `real_after_round1.json` | ✅ ตาราง Pipeline vs Baseline ใน README แล้ว |
+| 4 ข้อ 1–2 | use case + Stage 1 | ✅ `thesis_notes.md` ข้อ 1–2 (Stage 1 = negative ablation) |
+| **4 ข้อ 3** | **baseline ที่อาจารย์ต้องการ** | ⏳ **ยังต้องถามอาจารย์** — คำถามร่างไว้ใน `thesis_notes.md` ท้ายไฟล์ |
+
+### สิ่งที่เหลือจริง ๆ ก่อนปิดเล่ม
+1. **ถามอาจารย์เรื่อง baseline** (คำถามพร้อมใน `thesis_notes.md`) — ได้คำตอบแล้วอาจต้องรันเพิ่ม 1 อย่าง
+2. (optional) ขยาย `real_test/` ให้ครบ 8 คลาส + เติม URL ต้นทาง
+3. (optional) เพิ่มข้อมูล crack จากแหล่งที่ 2 แล้ว retrain 4 seeds ถ้าอยากดัน crack ขึ้นจาก 0.687
+   — ไม่จำเป็นสำหรับเล่ม (รายงานเป็น limitation แล้ว)
