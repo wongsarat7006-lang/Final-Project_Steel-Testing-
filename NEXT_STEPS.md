@@ -27,6 +27,35 @@
 ใส่เป็น positive แล้ว `python make_gate_dataset.py && python train_gate.py` ใหม่
 → รากปัญหาเดียวกับทั้งโปรเจค: **ขาดภาพเหล็กในสภาพใช้งานจริง**
 
+### เดโม — รอบทดสอบ + แก้บั๊ก (2026-09-08)
+ทดสอบ `app.py` กับภาพตัวอย่างทั้งหมด (โมเดล default = train-real1). วิธีวัดรุ่นเดโม:
+```powershell
+python evaluate_real.py --weights runs/detect/train-real1/weights/best.pt `
+                        --thresholds thresholds_demo.json --out results/real_after_round1.json
+```
+(ค่า default ของ `evaluate_real.py` = โมเดลเล่มจบ train-gray-n2 rust conf 0.92 → transfer ~0 บนภาพจริง
+= negative ablation ที่ลงเล่มแล้ว ; เพิ่ม flag `--thresholds` แล้วถึงจะวัดรุ่นเดโมได้)
+
+**ผลรุ่นเดโมบน real_test 18 ภาพ:** rust 8/12 (P .73 R .67) · crack 1/3 · pitted/patches/scratches = 0
+· micro-F1 0.50 ; baseline (ไม่มี Stage 1) เท่าหรือดีกว่าทุก metric + เร็วกว่า 12× → Stage 1 = negative
+
+**บั๊กที่แก้:**
+1. `real_005/009/014/018` (เหล็กสนิมจริง) ขึ้น "ไม่พบพื้นผิวเหล็ก" → ลดเป็นหมายเหตุใต้ "ไม่พบตำหนิ"
+   (gate + DMS46 ให้ ~0 กับเหล็กผุพอ ๆ กับภาพไม่ใช่เหล็ก)
+2. โหมดความไว "ไว/ไวมาก" (×0.6/×0.4 threshold) ทำให้ detection อ่อน ๆ ที่ผ่านเพราะลด threshold
+   ขึ้นเป็น "ยืนยัน" + headline "ความเสี่ยงสูง" ได้ — เช่น `real_015` (ผนังปูน) → crack 0.19 "ความเสี่ยงสูง"
+   → แก้: "ยืนยัน" ต้องผ่าน threshold ที่จูนไว้ (โหมดมาตรฐาน) เท่านั้น ; ที่ผ่านเพราะโหมดความไว = "อาจมี"
+   → sweep พบว่า sensitivity **กู้ตำหนิจริงกลับมาได้ 0 ชิ้น** บน real_test (เพิ่มแต่ FP) — cap ไว้จึงไม่เสียอะไร
+3. multiscale: กู้สนิม +1 ภาพ แลก FP +1 (real_015 plaster crack, patches หลอนบน real_017) — marginal,
+   ถูกแล้วที่ปิด default ไม่ควรดันให้เปิด
+
+**ยังพลาด (แก้ที่ app.py ไม่ได้ — ต้องมีข้อมูลจริง):** patches/pitted_surface/scratches/crack บนภาพถ่ายจริง
+· `real_002` scratches→rust, `real_013/017` crack→rust (weld crack) — โมเดลสับสนคลาส ไม่ใช่แค่ threshold
+· `real_008` (รอยแตกคอนกรีต distractor) → crack 0.71 "ความเสี่ยงสูง" ทุก config (gate P=0 แต่ advisory)
+
+**optional ต่อ:** เก็บภาพ normal steel จริง 10–20 ภาพใส่ `real_test/` — ตอนนี้วัด specificity ไม่ได้
+(มีเหล็กสะอาดจริงแค่ `normal_steel_example.jpg` 1 ภาพ ; distractor 2 ภาพเป็นปูน ไม่ใช่เหล็ก)
+
 ### Round 2 — train-real2 (2026-09-07) — ผลปนเป, ยังไม่ใช้เป็น default
 Import 4 dataset ใน `downloads/` (corrosion-detection-sb1, rust-detect-1350, rust-detection-small,
 corrosion-and-cracks) = **1022 ภาพสนิม scene จริง** → `dataset_real/round2` → merge → fine-tune จาก
