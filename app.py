@@ -228,6 +228,54 @@ def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multisca
                 [], "", {})
 
 
+_C_OK, _C_MAYBE = (68, 68, 239), (11, 158, 245)   # BGR ~ #ef4444 / #f59e0b
+
+
+def _rt_card(n, found, err=None):
+    """การ์ดสรุปสดของโหมดเรียลไทม์ — n < 0 = error, 0 = ยังไม่พบ, >0 = จำนวนตำหนิในเฟรม"""
+    if err:
+        return f"<div class='rt-count rt-err'>ประมวลผลเฟรมไม่สำเร็จ: {err}</div>"
+    if not n:
+        return "<div class='rt-count rt-ok'>● ยังไม่พบตำหนิในเฟรม</div>"
+    lst = " · ".join(f"{k} {v:.0%}" for k, v in sorted(found.items(), key=lambda kv: -kv[1]))
+    return (f"<div class='rt-count rt-hit'>● พบตำหนิ <b>{n}</b> จุดในเฟรมนี้</div>"
+            f"<div class='rt-list'>{lst}</div>")
+
+
+def analyze_stream(frame_rgb):
+    """โหมดเรียลไทม์: รัน Stage 2 บนเฟรมกล้องต่อเนื่อง (ข้าม Stage 1) — เร็วพอสำหรับดูสด
+    ใช้ค่าคงที่เดียวกับหน้าอัปโหลด (โมเดลตัวแรกที่มี = train-real3, threshold รายคลาส)
+    คืน (เฟรมพร้อมกรอบ+ป้ายไทย, การ์ดสรุปสด)"""
+    if frame_rgb is None:
+        return None, _rt_card(0, {})
+    try:
+        bgr = _to_bgr(frame_rgb)
+        mk = next(iter(_available_models()), None)
+        _, s2, device = _ensure_models(mk)
+        cc = _STATE["class_conf"] or {}
+        dets = P.run_stage2(s2, bgr, _RAW_FLOOR, device, augment=False, class_conf=None)
+        S = max(bgr.shape[:2])
+        lw = max(2, round(S / 380))
+        fpx = int(min(48, max(16, S / 40)))
+        found, n = {}, 0
+        for d in dets:
+            if d["confidence"] < max(_RAW_FLOOR, cc.get(d["class"], 0.4)):
+                continue
+            n += 1
+            x1, y1, x2, y2 = (int(v) for v in d["bbox_xyxy_crop"])
+            cv2.rectangle(bgr, (x1, y1), (x2, y2), (255, 255, 255), lw + 2)
+            cv2.rectangle(bgr, (x1, y1), (x2, y2), _C_OK, lw)
+            di = P.DEFECT_INFO[d["class"]]
+            ly = y1 - fpx - 6 if y1 - fpx - 6 >= 2 else y1 + 4
+            bgr = P.draw_thai_text(bgr, f"{di['name_th']} {d['confidence']:.0%}",
+                                   (max(x1, 3), ly), color_bgr=_C_OK, font_size=fpx)
+            k = di["name_th"]
+            found[k] = max(found.get(k, 0), d["confidence"])
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), _rt_card(n, found)
+    except Exception as e:
+        return frame_rgb, _rt_card(-1, {}, err=str(e))
+
+
 def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multiscale, progress):
     if image_rgb is None:
         return None, _empty_banner(), [], "", {}
@@ -551,6 +599,14 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .causes-item b{color:var(--fg);font-size:15px}
 .causes-risk{font-size:12.5px;color:var(--fg-3);margin-left:8px}
 .causes-adv{color:var(--fg-3);margin-top:3px}
+/* เรียลไทม์ — การ์ดนับสด */
+.rt-count{font-size:17px;font-weight:800;padding:12px 16px;border-radius:12px;
+    border:1px solid var(--border);border-left:5px solid var(--border);
+    background:var(--card);margin-top:8px}
+.rt-count.rt-ok{border-left-color:#22c55e;color:#16a34a}
+.rt-count.rt-hit{border-left-color:#ef4444;color:#dc2626}
+.rt-count.rt-err{border-left-color:#f59e0b;color:#b45309;font-size:13px;font-weight:600}
+.rt-list{font-size:14px;color:var(--fg-2);margin-top:6px;padding:0 4px}
 /* feedback */
 .fb{border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-top:12px;background:var(--card)}
 .fb-h{font-size:14.5px;font-weight:800;color:var(--fg);margin-bottom:4px}
@@ -605,7 +661,7 @@ def build_ui():
         gate_on = gr.State(steel_gate.available())
         multiscale = gr.State(False)
 
-        # ===== รับภาพ: อัปโหลด / ถ่ายภาพ =====
+        # ===== รับภาพ: อัปโหลด / ถ่ายภาพ / เรียลไทม์ =====
         with gr.Tabs():
             with gr.Tab("อัปโหลดภาพ"):
                 inp = gr.Image(type="numpy", label="ภาพเหล็กที่จะตรวจ", height=300,
@@ -621,6 +677,16 @@ def build_ui():
                 cam = gr.Image(type="numpy", label="กล้อง", height=340, sources=["webcam"])
                 gr.HTML("<div class='hint'>อนุญาตให้เบราว์เซอร์ใช้กล้อง → เล็งไปที่ผิวเหล็ก → "
                         "<b>กดปุ่มถ่าย (วงกลม) ที่มุมล่างของภาพกล้อง</b> → ระบบตรวจให้อัตโนมัติ</div>")
+
+            with gr.Tab("เรียลไทม์"):
+                gr.HTML("<div class='hint'>สตรีมกล้องต่อเนื่อง → ระบบวาดกรอบ + นับตำหนิสดทุก ~0.3 วินาที "
+                        "(ตรวจ Stage 2 บนเฟรมเต็ม ข้าม Stage 1 · เฟรมเบลอ/สั่นอาจเตือนผิด) · "
+                        "กล้องบนมือถือ/เครื่องอื่นต้องเข้าผ่าน <b>https</b> (รัน <code>python app.py --share</code>)</div>")
+                rt_in = gr.Image(type="numpy", label="กล้อง (สด)", height=300,
+                                 sources=["webcam"], streaming=True)
+                rt_out = gr.Image(type="numpy", label="ผลเรียลไทม์", interactive=False,
+                                  elem_classes=["result-img"])
+                rt_txt = gr.HTML(_rt_card(0, {}))
 
         # ===== ผลตรวจ (โหมด อัปโหลด + ถ่ายภาพ) =====
         with gr.Row(equal_height=False):
@@ -676,6 +742,10 @@ def build_ui():
 
         fb_send.click(submit_feedback,
                       inputs=[cur_in, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
+
+        # โหมดเรียลไทม์ — สตรีมเฟรมกล้อง (ใช้ config คงที่เดียวกับหน้าอัปโหลด)
+        rt_in.stream(analyze_stream, inputs=[rt_in], outputs=[rt_out, rt_txt],
+                     show_progress="hidden", stream_every=0.3, concurrency_limit=1)
     return demo
 
 
