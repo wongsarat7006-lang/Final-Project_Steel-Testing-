@@ -525,6 +525,14 @@ _JS_ONLOAD = """
             .forEach(e => e.classList.toggle('dark', dark));
   } catch (e) {}
 
+  // ถ้าเปิดแบบไม่ปลอดภัย (http บน LAN) — ส่องหน้าจอจะไม่ทำงาน แจ้งเตือนไว้ก่อน
+  try {
+    if (!window.isSecureContext) {
+      const w = document.getElementById('rt_warn');
+      if (w) w.style.display = 'block';
+    }
+  } catch (e) {}
+
   if (!window.__ss) window.__ss = {stream:null, video:null, canvas:null, timer:null, busy:false};
   window.__ssPush = () => {
     const st = window.__ss;
@@ -653,6 +661,9 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .causes-adv{color:var(--fg-3);margin-top:3px}
 /* เรียลไทม์ */
 #ss_frame{display:none!important}
+.rt-warn{border:1px solid #fcd9b0;background:#fff7ec;color:#8a4b12;border-radius:10px;
+    padding:11px 15px;margin:6px 2px 10px;font-size:13px;line-height:1.7}
+.rt-warn code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:4px;font-size:12px}
 .rt-count{font-size:17px;font-weight:800;padding:12px 16px;border-radius:12px;
     border:1px solid var(--border);border-left:5px solid var(--border);
     background:var(--card);margin-top:8px}
@@ -731,17 +742,20 @@ def build_ui():
                 gr.HTML("<div class='hint'>อนุญาตให้เบราว์เซอร์ใช้กล้อง → เล็งไปที่ผิวเหล็ก → "
                         "<b>กดปุ่มถ่าย (วงกลม) ที่มุมล่างของภาพกล้อง</b> → ระบบตรวจให้อัตโนมัติ</div>")
 
-            with gr.Tab("เรียลไทม์"):
-                gr.HTML("<div class='hint'>ตรวจสด — วาดกรอบ + นับตำหนิทุก ~0.35 วินาที "
-                        "(Stage 2 บนเฟรมเต็ม ข้าม Stage 1) · "
-                        "ต้องเปิดผ่าน <b>https</b> หรือ <b>localhost</b> (รัน <code>python app.py --share</code> "
-                        "สำหรับมือถือ/เครื่องอื่น) · ส่องหน้าจอใช้ได้เฉพาะเบราว์เซอร์บนคอมพิวเตอร์</div>")
+            with gr.Tab("เรียลไทม์ (ส่องหน้าจอ)"):
+                gr.HTML(
+                    "<div class='hint'>กด <b>ส่องหน้าจอ</b> แล้วเลือกหน้าต่าง/แท็บที่จะให้ตรวจ — "
+                    "ระบบวาดกรอบ + นับตำหนิสดทุก ~0.35 วินาที (Stage 2 บนเฟรมเต็ม ข้าม Stage 1)</div>"
+                    "<div id='rt_warn' class='rt-warn' style='display:none'>"
+                    "⚠️ หน้านี้เปิดแบบ <b>http</b> — เบราว์เซอร์จะไม่ยอมให้ส่องหน้าจอ<br>"
+                    "วิธีแก้: รัน <code>python app.py --share</code> แล้วเปิดลิงก์ <code>https://…gradio.live</code> · "
+                    "หรือเปิดที่ <code>http://127.0.0.1:7860</code> บนเครื่องนี้ · "
+                    "หรือตั้ง flag <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> "
+                    "= ที่อยู่นี้ แล้วรีสตาร์ตเบราว์เซอร์</div>")
                 with gr.Row():
-                    ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="sm")
-                    ss_stop = gr.Button("■ หยุด", size="sm")
+                    ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="lg")
+                    ss_stop = gr.Button("■ หยุด", size="lg")
                 ss_frame = gr.Textbox(elem_id="ss_frame")   # ซ่อนด้วย CSS — รับ data:URL จาก JS
-                rt_in = gr.Image(type="numpy", label="หรือใช้กล้องเว็บแคม", height=260,
-                                 sources=["webcam"], streaming=True)
                 rt_out = gr.Image(type="numpy", label="ผลตรวจสด", interactive=False,
                                   elem_classes=["result-img"])
                 rt_txt = gr.HTML(_rt_card(0, {}))
@@ -801,9 +815,7 @@ def build_ui():
         fb_send.click(submit_feedback,
                       inputs=[cur_in, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
 
-        # โหมดเรียลไทม์ — เว็บแคมสตรีม + ส่องหน้าจอ (config คงที่เดียวกับหน้าอัปโหลด)
-        rt_in.stream(analyze_stream, inputs=[rt_in], outputs=[rt_out, rt_txt],
-                     show_progress="hidden", stream_every=0.35, concurrency_limit=1)
+        # โหมดเรียลไทม์ — ส่องหน้าจอ (config คงที่เดียวกับหน้าอัปโหลด)
         ss_start.click(fn=None, js="() => window.__startScreen()")
         ss_stop.click(fn=None, js="() => window.__stopScreen()")
         ss_frame.change(analyze_screen, inputs=[ss_frame], outputs=[rt_out, rt_txt],
