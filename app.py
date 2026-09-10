@@ -607,9 +607,10 @@ _JS_ONLOAD = r"""
   if (!window.__ssClickBound) {
     window.__ssClickBound = true;
     document.addEventListener('click', (e) => {
-      if (e.target.closest && e.target.closest('#ss_start')) {
+      const t = e.target;
+      if (t.closest && t.closest('#ss_start')) {
         e.preventDefault(); console.log('[steeldemo] ส่องหน้าจอ: คลิก'); window.__startScreen();
-      } else if (e.target.closest && e.target.closest('#ss_stop')) {
+      } else if (t.closest && (t.closest('#ss_stop') || t.closest('#rt_close'))) {
         e.preventDefault(); window.__stopScreen();
       }
     }, true);
@@ -659,13 +660,18 @@ _JS_ONLOAD = r"""
       if (holder) { holder.innerHTML = ''; holder.appendChild(v); }
       S.stream = s; S.video = v; S.canvas = document.createElement('canvas'); S.busy = false;
       s.getVideoTracks()[0].addEventListener('ended', () => window.__stopScreen());
+      const sc = $('rt_scope');
+      if (sc) { delete sc.dataset.x; delete sc.dataset.y; delete sc.dataset.w; delete sc.dataset.h; }
       initScopeDrag();
       v.addEventListener('loadedmetadata', clampScope);
       setTimeout(clampScope, 120);
       if (S.timer) clearInterval(S.timer);
       S.timer = setInterval(window.__ssPush, 400);
-      if (hint) hint.textContent = 'ลากกรอบ · มุมล่างขวา = ย่อ/ขยาย';
+      if (hint) hint.textContent = 'ลากกรอบไปครอบจุดที่จะตรวจ · มุมล่างขวา = ย่อ/ขยาย';
       if (warn) { warn.classList.remove('rt-warn-hot'); warn.style.display = 'none'; }
+      if (stage) stage.classList.add('full');           // เต็มจอ — เหมือนส่องบนเดสก์ท็อปจริง
+      try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch (e) {}
+      setTimeout(clampScope, 260);
     } catch (e) {
       console.warn('[steeldemo] getDisplayMedia error', e);
       fail((e && e.name === 'NotAllowedError')
@@ -677,9 +683,12 @@ _JS_ONLOAD = r"""
     if (S.timer) clearInterval(S.timer); S.timer = null;
     if (S.stream) S.stream.getTracks().forEach(t => t.stop());
     S.stream = null; S.video = null; S.canvas = null; S.busy = false;
-    const stage = $('rt_stage'); if (stage) stage.style.display = 'none';
+    const stage = $('rt_stage');
+    if (stage) { stage.style.display = 'none'; stage.classList.remove('full'); }
+    try { document.fullscreenElement && document.exitFullscreen(); } catch (e) {}
     const holder = $('rt_video_holder'); if (holder) holder.innerHTML = '';
     const cv = $('rt_overlay'); if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+    const sum = $('rt_live_summary'); if (sum) sum.textContent = '';
   };
 
   // เรียกหลัง Python คืนผล — วาดกล่องที่เจอทับวิดีโอสด + ปลดล็อกเฟรมถัดไป
@@ -705,6 +714,16 @@ _JS_ONLOAD = r"""
       g.fillStyle = 'rgba(0,0,0,.74)'; g.fillRect(X, ty, tw, 18);
       g.fillStyle = '#fff'; g.fillText(t, X + 5, ty + 3);
     });
+    const sum = $('rt_live_summary');
+    if (sum) {
+      const uniq = {};
+      data.boxes.forEach(b => { uniq[b.label] = Math.max(uniq[b.label] || 0, b.conf); });
+      const parts = Object.entries(uniq).sort((a, b) => b[1] - a[1])
+                    .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%');
+      sum.textContent = data.boxes.length
+        ? 'พบ ' + data.boxes.length + ' จุด · ' + parts.join(' · ')
+        : 'ยังไม่พบตำหนิในกรอบ';
+    }
   };
 
   try { if (!window.isSecureContext) { const w = $('rt_warn'); if (w) w.style.display = 'block'; } } catch (e) {}
@@ -810,13 +829,19 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .rt-stage{position:relative;margin-top:10px;border-radius:12px;overflow:hidden;
     background:#000;border:1px solid var(--border);user-select:none;touch-action:none}
 #rt_video_holder video{width:100%;display:block;max-height:66vh;object-fit:contain;background:#000}
+/* เต็มจอ — ให้รู้สึกเหมือนลากกรอบบนเดสก์ท็อปจริง */
+.rt-stage.full{position:fixed;inset:0;z-index:2147483000;margin:0;border:0;border-radius:0}
+.rt-stage.full #rt_video_holder video{width:100vw;height:100vh;max-height:none;object-fit:contain}
 .rt-overlay{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
 .rt-scope{position:absolute;left:22%;top:22%;width:56%;height:56%;box-sizing:border-box;z-index:2;
     border:2px solid #22d3ee;box-shadow:0 0 0 9999px rgba(0,0,0,.45);cursor:move}
-.rt-scope-handle{position:absolute;right:-9px;bottom:-9px;width:18px;height:18px;
-    background:#22d3ee;border:2px solid #fff;border-radius:4px;cursor:se-resize}
-.rt-stage-hint{position:absolute;left:8px;top:8px;z-index:3;font-size:11.5px;color:#fff;
-    background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px}
+.rt-scope-handle{position:absolute;right:-11px;bottom:-11px;width:22px;height:22px;
+    background:#22d3ee;border:2px solid #fff;border-radius:5px;cursor:se-resize;touch-action:none}
+.rt-bar{position:absolute;left:0;right:0;top:0;z-index:4;display:flex;align-items:center;gap:12px;
+    padding:8px 12px;background:linear-gradient(rgba(0,0,0,.7),rgba(0,0,0,0));color:#fff;font-size:12.5px}
+.rt-livesum{flex:1;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt-close{margin-left:auto;background:#ef4444;color:#fff;border:0;border-radius:8px;
+    padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer}
 /* แผงผลสด — สไตล์เดียวกับ overlay ในแอปมือถือ (ลิสต์ทุกชนิด + แถบ %) */
 .rt-panel{border:1px solid var(--border);border-left:5px solid var(--border);
     border-radius:12px;background:var(--card);padding:12px 14px;margin-top:8px}
@@ -928,8 +953,12 @@ def build_ui():
                     "<div id='rt_stage' class='rt-stage' style='display:none'>"
                     "<div id='rt_video_holder'></div>"
                     "<canvas id='rt_overlay' class='rt-overlay'></canvas>"
-                    "<div id='rt_hint' class='rt-stage-hint'>ลากกรอบ · มุมล่างขวา = ย่อ/ขยาย</div>"
                     "<div id='rt_scope' class='rt-scope'><div class='rt-scope-handle'></div></div>"
+                    "<div class='rt-bar'>"
+                    "<span id='rt_hint'>ลากกรอบไปครอบจุดที่จะตรวจ · มุมล่างขวา = ย่อ/ขยาย</span>"
+                    "<span id='rt_live_summary' class='rt-livesum'></span>"
+                    "<button id='rt_close' class='rt-close'>✕ ปิด</button>"
+                    "</div>"
                     "</div>")
                 rt_txt = gr.HTML(_rt_card(0, {}))
                 gr.HTML(
