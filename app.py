@@ -276,6 +276,21 @@ def analyze_stream(frame_rgb):
         return frame_rgb, _rt_card(-1, {}, err=str(e))
 
 
+def analyze_screen(data_url):
+    """โหมดเรียลไทม์ (ส่องหน้าจอ): รับเฟรม data:URL จาก getDisplayMedia แล้วส่งเข้า analyze_stream"""
+    if not data_url or "," not in data_url:
+        return gr.update(), gr.update()
+    try:
+        import base64
+        raw = base64.b64decode(data_url.split(",", 1)[1])
+        bgr = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+        if bgr is None:
+            return gr.update(), gr.update()
+        return analyze_stream(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+    except Exception as e:
+        return gr.update(), _rt_card(-1, {}, err=str(e))
+
+
 def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multiscale, progress):
     if image_rgb is None:
         return None, _empty_banner(), [], "", {}
@@ -498,7 +513,7 @@ def submit_feedback(orig_rgb, annotated_rgb, state, rating, comment):
     return "ขอบคุณสำหรับ feedback — บันทึกแล้ว"
 
 
-# โหลดตอนเปิดหน้า — เลือกโทนตามที่เคยตั้ง หรือตามระบบ
+# โหลดตอนเปิดหน้า — ตั้งโทนสี + เตรียมฟังก์ชัน "ส่องหน้าจอ" (screen capture) ของโหมดเรียลไทม์
 _JS_ONLOAD = """
 () => {
   try {
@@ -509,6 +524,41 @@ _JS_ONLOAD = """
     document.querySelectorAll('gradio-app, .gradio-container')
             .forEach(e => e.classList.toggle('dark', dark));
   } catch (e) {}
+
+  if (!window.__ss) window.__ss = {stream:null, video:null, canvas:null, timer:null, busy:false};
+  window.__ssPush = () => {
+    const st = window.__ss;
+    if (!st.video || st.busy) return;
+    const w = st.video.videoWidth, h = st.video.videoHeight;
+    if (!w) return;
+    const k = Math.min(1, 960 / w);
+    st.canvas.width = Math.round(w * k); st.canvas.height = Math.round(h * k);
+    st.canvas.getContext('2d').drawImage(st.video, 0, 0, st.canvas.width, st.canvas.height);
+    const box = document.querySelector('#ss_frame textarea');
+    if (!box) return;
+    st.busy = true;
+    box.value = st.canvas.toDataURL('image/jpeg', 0.7);
+    box.dispatchEvent(new Event('input', {bubbles: true}));
+  };
+  window.__startScreen = async () => {
+    try {
+      const s = await navigator.mediaDevices.getDisplayMedia({video: {frameRate: 8}, audio: false});
+      const v = document.createElement('video');
+      v.srcObject = s; v.muted = true; await v.play();
+      window.__ss = {stream:s, video:v, canvas:document.createElement('canvas'), timer:null, busy:false};
+      s.getVideoTracks()[0].addEventListener('ended', () => window.__stopScreen());
+      window.__ss.timer = setInterval(window.__ssPush, 350);
+    } catch (e) {
+      alert('เปิดการส่องหน้าจอไม่ได้ — เบราว์เซอร์ต้องเป็น https หรือ localhost ' +
+            '(รัน python app.py --share) และต้องเป็นเบราว์เซอร์บนคอมพิวเตอร์');
+    }
+  };
+  window.__stopScreen = () => {
+    const st = window.__ss;
+    if (st.timer) clearInterval(st.timer);
+    if (st.stream) st.stream.getTracks().forEach(t => t.stop());
+    window.__ss = {stream:null, video:null, canvas:null, timer:null, busy:false};
+  };
 }
 """
 # ปุ่มสลับโทนสว่าง/มืด
@@ -521,6 +571,8 @@ _JS_TOGGLE = """
   try { localStorage.setItem('steeldemo_theme', on ? 'dark' : 'light'); } catch (e) {}
 }
 """
+# หลัง Python ประมวลผลเฟรมส่องหน้าจอเสร็จ -> ปลดล็อกให้ส่งเฟรมถัดไป (backpressure)
+_JS_SS_DONE = "() => { if (window.__ss) window.__ss.busy = false; }"
 
 _CSS = """
 :root{
@@ -599,7 +651,8 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .causes-item b{color:var(--fg);font-size:15px}
 .causes-risk{font-size:12.5px;color:var(--fg-3);margin-left:8px}
 .causes-adv{color:var(--fg-3);margin-top:3px}
-/* เรียลไทม์ — การ์ดนับสด */
+/* เรียลไทม์ */
+#ss_frame{display:none!important}
 .rt-count{font-size:17px;font-weight:800;padding:12px 16px;border-radius:12px;
     border:1px solid var(--border);border-left:5px solid var(--border);
     background:var(--card);margin-top:8px}
@@ -679,12 +732,17 @@ def build_ui():
                         "<b>กดปุ่มถ่าย (วงกลม) ที่มุมล่างของภาพกล้อง</b> → ระบบตรวจให้อัตโนมัติ</div>")
 
             with gr.Tab("เรียลไทม์"):
-                gr.HTML("<div class='hint'>สตรีมกล้องต่อเนื่อง → ระบบวาดกรอบ + นับตำหนิสดทุก ~0.3 วินาที "
-                        "(ตรวจ Stage 2 บนเฟรมเต็ม ข้าม Stage 1 · เฟรมเบลอ/สั่นอาจเตือนผิด) · "
-                        "กล้องบนมือถือ/เครื่องอื่นต้องเข้าผ่าน <b>https</b> (รัน <code>python app.py --share</code>)</div>")
-                rt_in = gr.Image(type="numpy", label="กล้อง (สด)", height=300,
+                gr.HTML("<div class='hint'>ตรวจสด — วาดกรอบ + นับตำหนิทุก ~0.35 วินาที "
+                        "(Stage 2 บนเฟรมเต็ม ข้าม Stage 1) · "
+                        "ต้องเปิดผ่าน <b>https</b> หรือ <b>localhost</b> (รัน <code>python app.py --share</code> "
+                        "สำหรับมือถือ/เครื่องอื่น) · ส่องหน้าจอใช้ได้เฉพาะเบราว์เซอร์บนคอมพิวเตอร์</div>")
+                with gr.Row():
+                    ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="sm")
+                    ss_stop = gr.Button("■ หยุด", size="sm")
+                ss_frame = gr.Textbox(elem_id="ss_frame")   # ซ่อนด้วย CSS — รับ data:URL จาก JS
+                rt_in = gr.Image(type="numpy", label="หรือใช้กล้องเว็บแคม", height=260,
                                  sources=["webcam"], streaming=True)
-                rt_out = gr.Image(type="numpy", label="ผลเรียลไทม์", interactive=False,
+                rt_out = gr.Image(type="numpy", label="ผลตรวจสด", interactive=False,
                                   elem_classes=["result-img"])
                 rt_txt = gr.HTML(_rt_card(0, {}))
 
@@ -743,9 +801,13 @@ def build_ui():
         fb_send.click(submit_feedback,
                       inputs=[cur_in, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
 
-        # โหมดเรียลไทม์ — สตรีมเฟรมกล้อง (ใช้ config คงที่เดียวกับหน้าอัปโหลด)
+        # โหมดเรียลไทม์ — เว็บแคมสตรีม + ส่องหน้าจอ (config คงที่เดียวกับหน้าอัปโหลด)
         rt_in.stream(analyze_stream, inputs=[rt_in], outputs=[rt_out, rt_txt],
-                     show_progress="hidden", stream_every=0.3, concurrency_limit=1)
+                     show_progress="hidden", stream_every=0.35, concurrency_limit=1)
+        ss_start.click(fn=None, js="() => window.__startScreen()")
+        ss_stop.click(fn=None, js="() => window.__stopScreen()")
+        ss_frame.change(analyze_screen, inputs=[ss_frame], outputs=[rt_out, rt_txt],
+                        show_progress="hidden", concurrency_limit=1).then(fn=None, js=_JS_SS_DONE)
     return demo
 
 
