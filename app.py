@@ -570,7 +570,67 @@ _JS_ONLOAD = (r"""
     }, true);
   }
 
-  // กรอบเล็ง = สี่เหลี่ยมกลางจอตายตัว (CSS จัดตำแหน่ง) — คืนพิกัดกรอบเทียบ "วิดีโอ" และ "เวที"
+  // กรอบเล็ง = สี่เหลี่ยม "ลากย้าย + ปรับขนาด" ได้ ทับได้ทั้งพื้นที่หน้าจอที่แชร์ (ตำแหน่งเก็บใน dataset px)
+  function applyScope() {
+    const sc = $('rt_scope'); if (!sc) return;
+    sc.style.left = (parseFloat(sc.dataset.x) || 0) + 'px';
+    sc.style.top = (parseFloat(sc.dataset.y) || 0) + 'px';
+    sc.style.width = (parseFloat(sc.dataset.w) || 120) + 'px';
+    sc.style.height = (parseFloat(sc.dataset.h) || 120) + 'px';
+  }
+  function clampScope() {
+    const st = $('rt_stage'), sc = $('rt_scope');
+    if (!st || !sc || !st.clientWidth) return;
+    const W = st.clientWidth, H = st.clientHeight;
+    let w = Math.max(60, Math.min(parseFloat(sc.dataset.w) || W * 0.5, W));
+    let h = Math.max(60, Math.min(parseFloat(sc.dataset.h) || H * 0.5, H));
+    let x = Math.max(0, Math.min(parseFloat(sc.dataset.x) || 0, W - w));
+    let y = Math.max(0, Math.min(parseFloat(sc.dataset.y) || 0, H - h));
+    sc.dataset.w = w; sc.dataset.h = h; sc.dataset.x = x; sc.dataset.y = y;
+    applyScope();
+  }
+  function resetScope() {
+    const st = $('rt_stage'), sc = $('rt_scope');
+    if (!st || !sc || !st.clientWidth) return;
+    const s = Math.round(Math.min(st.clientWidth, st.clientHeight) * 0.55);
+    sc.dataset.w = s; sc.dataset.h = s;
+    sc.dataset.x = Math.round((st.clientWidth - s) / 2);
+    sc.dataset.y = Math.round((st.clientHeight - s) / 2);
+    applyScope();
+  }
+  function initScopeDrag() {
+    const sc = $('rt_scope'); if (!sc || sc.__wired) return; sc.__wired = true;
+    let mode = null, px = 0, py = 0, ox = 0, oy = 0, ow = 0, oh = 0;
+    const pt = e => e.touches ? e.touches[0] : e;
+    const down = (e, m) => {
+      mode = m; const p = pt(e); px = p.clientX; py = p.clientY;
+      ox = parseFloat(sc.dataset.x) || 0; oy = parseFloat(sc.dataset.y) || 0;
+      ow = parseFloat(sc.dataset.w) || 0; oh = parseFloat(sc.dataset.h) || 0;
+      e.preventDefault(); e.stopPropagation();
+    };
+    const mv = e => {
+      if (!mode) return;
+      const p = pt(e), dx = p.clientX - px, dy = p.clientY - py;
+      if (mode === 'move') { sc.dataset.x = ox + dx; sc.dataset.y = oy + dy; }
+      else { sc.dataset.w = ow + dx; sc.dataset.h = oh + dy; }
+      clampScope(); e.preventDefault();
+    };
+    const up = () => { mode = null; };
+    sc.addEventListener('mousedown', e => { if (e.target === sc) down(e, 'move'); });
+    sc.addEventListener('touchstart', e => { if (e.target === sc) down(e, 'move'); }, {passive: false});
+    const h = sc.querySelector('.rt-scope-handle');
+    if (h) {
+      h.addEventListener('mousedown', e => down(e, 'resize'));
+      h.addEventListener('touchstart', e => down(e, 'resize'), {passive: false});
+    }
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('touchmove', mv, {passive: false});
+    window.addEventListener('mouseup', up);
+    window.addEventListener('touchend', up);
+  }
+  initScopeDrag();
+
+  // คืนพิกัดกรอบเทียบ "วิดีโอ" (พิกัดจริงของภาพ) และ "เวที" (พิกัดบนจอ)
   function rectVsVideo() {
     const sc = $('rt_scope'), v = S.video; if (!sc || !v || !v.videoWidth) return null;
     const sr = sc.getBoundingClientRect(), vr = v.getBoundingClientRect();
@@ -625,9 +685,12 @@ _JS_ONLOAD = (r"""
       s.getVideoTracks()[0].addEventListener('ended', () => window.__stopScreen());
       if (stage) stage.classList.add('full');
       try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch (e) {}
+      initScopeDrag();
+      setTimeout(resetScope, 280);                     // ตั้งกรอบไว้กลาง หลังเข้าเต็มจอ (เวทีได้ขนาดใหม่)
+      v.addEventListener('loadedmetadata', () => setTimeout(resetScope, 60));
       if (S.timer) clearInterval(S.timer);
       S.timer = setInterval(window.__ssPush, 900);
-      if (hint) hint.textContent = 'เล็งให้ตำหนิอยู่ในกรอบสีฟ้ากลางจอ';
+      if (hint) hint.textContent = 'ลากกรอบไปครอบจุดที่จะตรวจ · มุมล่างขวา = ปรับขนาด';
       if (warn) { warn.classList.remove('rt-warn-hot'); warn.style.display = 'none'; }
     } catch (e) {
       console.warn('[steeldemo] getDisplayMedia error', e);
@@ -794,11 +857,11 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .rt-stage.full{position:fixed;inset:0;z-index:2147483000;margin:0;border:0;border-radius:0}
 .rt-stage.full #rt_video_holder video{width:100vw;height:100vh;max-height:none;object-fit:contain}
 .rt-overlay{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
-/* กรอบเล็ง = สี่เหลี่ยมกลางจอตายตัว (ไม่ต้องลาก) นอกกรอบมืดลง */
-.rt-scope{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-    width:60%;height:60%;box-sizing:border-box;z-index:2;pointer-events:none;
-    border:2px solid #22d3ee;box-shadow:0 0 0 9999px rgba(0,0,0,.42)}
-.rt-stage.full .rt-scope{width:62vmin;height:62vmin}
+/* กรอบเล็ง — ลากย้าย + ปรับขนาดได้ ทับได้ทั้งพื้นที่หน้าจอที่แชร์ นอกกรอบมืดลง */
+.rt-scope{position:absolute;left:20%;top:20%;width:56%;height:56%;box-sizing:border-box;z-index:2;
+    cursor:move;touch-action:none;border:2px solid #22d3ee;box-shadow:0 0 0 9999px rgba(0,0,0,.42)}
+.rt-scope-handle{position:absolute;right:-12px;bottom:-12px;width:24px;height:24px;
+    background:#22d3ee;border:3px solid #fff;border-radius:6px;cursor:se-resize;touch-action:none}
 .rt-readout{position:absolute;left:12px;top:46px;z-index:4;min-width:210px;max-width:72vw;
     background:rgba(0,0,0,.62);border-radius:10px;padding:10px 12px;pointer-events:none;
     font-family:ui-monospace,Menlo,Consolas,monospace;color:#fff}
@@ -902,9 +965,10 @@ def build_ui():
 
             with gr.Tab("เรียลไทม์ (ส่องหน้าจอ)"):
                 gr.HTML(
-                    "<div class='hint'>กด <b>ส่องหน้าจอ</b> → เลือกหน้าต่าง/แท็บที่จะแชร์ → หน้าจอจะขึ้น<b>เต็มจอ</b> "
-                    "พร้อม<b>กรอบเล็งสีฟ้ากลางจอ</b> · เลื่อนสิ่งที่จะตรวจให้อยู่ในกรอบ — "
-                    "ระบบตรวจเฉพาะในกรอบทุก ~0.9 วินาที วาดกรอบแดง + ไล่ผล 8 ชนิดที่มุมซ้ายบน (ข้าม Stage 1)</div>"
+                    "<div class='hint'>กด <b>ส่องหน้าจอ</b> → เลือกหน้าจอที่จะแชร์ → ภาพขึ้น<b>เต็มจอ</b> "
+                    "พร้อม<b>กรอบสีฟ้า</b>ที่<b>ลากย้าย + ปรับขนาดได้</b> (ลากตัวกรอบ = ย้าย · ลากปุ่มมุมล่างขวา = ปรับขนาด) "
+                    "→ วางกรอบครอบจุดไหนก็ได้บนหน้าจอที่แชร์ · ระบบตรวจเฉพาะในกรอบทุก ~0.9 วินาที "
+                    "วาดกรอบแดง + ไล่ผล 8 ชนิดที่มุมซ้ายบน (ข้าม Stage 1)</div>"
                     "<div id='rt_warn' class='rt-warn' style='display:none'>"
                     "⚠️ <b>ส่องหน้าจอไม่ได้</b> — เบราว์เซอร์ยอมให้ทำเฉพาะหน้าที่เป็น <b>https</b> หรือ <b>localhost</b><br>"
                     "• รัน <code>python app.py --share</code> แล้วเปิดลิงก์ <code>https://…gradio.live</code><br>"
@@ -921,17 +985,17 @@ def build_ui():
                     "<div id='rt_stage' class='rt-stage' style='display:none'>"
                     "<div id='rt_video_holder'></div>"
                     "<canvas id='rt_overlay' class='rt-overlay'></canvas>"
-                    "<div id='rt_scope' class='rt-scope'></div>"
+                    "<div id='rt_scope' class='rt-scope'><div class='rt-scope-handle'></div></div>"
                     "<div id='rt_readout' class='rt-readout'></div>"
                     "<div class='rt-bar'>"
-                    "<span id='rt_hint'>เล็งให้ตำหนิอยู่ในกรอบสีฟ้ากลางจอ</span>"
+                    "<span id='rt_hint'>ลากกรอบไปครอบจุดที่จะตรวจ · มุมล่างขวา = ปรับขนาด</span>"
                     "<button id='rt_close' class='rt-close'>✕ ปิด</button>"
                     "</div>"
                     "</div>")
                 rt_txt = gr.HTML(_rt_card(0, {}))
                 gr.HTML(
                     "<div class='rt-desc'>"
-                    "<b>โหมดนี้ทำอะไร</b> — ส่องหน้าจอเต็มจอ + กรอบเล็งกลางจอ · ครอปเฉพาะในกรอบทุก ~0.9 วินาที "
+                    "<b>โหมดนี้ทำอะไร</b> — ส่องหน้าจอเต็มจอ + กรอบสีฟ้าลาก/ปรับขนาดได้ · ครอปเฉพาะในกรอบทุก ~0.9 วินาที "
                     "แล้วให้ Stage 2 (YOLO11n) ตรวจตำหนิ โดย<b>ข้าม Stage 1</b> (ไม่หาพื้นที่เหล็กก่อน) เพื่อให้เร็วพอดูสด<br>"
                     "<b>อ่านผลยังไง</b> — กรอบแดง + ป้าย “ชื่อ NN% · กว้าง×สูง(px)” บนภาพสด · "
                     "แผงมุมซ้ายบนไล่ทั้ง 8 ชนิด ตัวเลข % = ความมั่นใจสูงสุดของชนิดนั้นในเฟรมปัจจุบัน · "
