@@ -51,7 +51,7 @@ steel-defect-detection/
 ├── DMS46_v1.pt              โมเดล Stage 1 (TorchScript)
 ├── pipeline.py              รัน pipeline 2-stage เต็มระบบ  ← ไฟล์หลัก (build_regions / run_stage1 / run_stage2 / cross_region_nms)
 ├── steel_gate.py            Stage 0 — classifier เหล็ก/ไม่เหล็ก (advisory, เดโมเท่านั้น)
-├── app.py                   Prototype UI (Gradio) — 3 แท็บ: อัปโหลด / ถ่ายภาพ / เรียลไทม์ (สตรีมกล้อง)
+├── app.py                   Prototype UI (Gradio) — 3 แท็บ: อัปโหลด / ถ่ายภาพ / เรียลไทม์ (ส่องหน้าจอ)
 ├── train.py                 เทรนโมเดล Stage 2  (--recipe {default,texture,camera,domainrand})
 ├── train_gate.py            เทรน Stage 0  (--recipe เดียว, yolo11n-cls)
 ├── run_round.py             รัน active-learning 1 รอบ (import → merge → train → eval)
@@ -221,7 +221,7 @@ python app.py --local-only    # เปิดเฉพาะเครื่อง
 
 - **ไม่มีตัวเลือกให้ผู้ใช้ปรับ** — โมเดล (`train-real3`) + โหมด (มาตรฐาน) + threshold ตั้งค่าที่เหมาะสุดไว้แล้ว
   โค้ดยังสลับโมเดล/เปิด TTA-multiscale ได้ผ่าน `_STAGE2_MODELS` / State ใน `app.py`
-- **3 แท็บรับภาพ:** อัปโหลด/วาง · ถ่ายจากกล้อง · **เรียลไทม์** (สตรีมกล้องต่อเนื่อง วาดกรอบ + นับตำหนิสดทุก ~0.3 วิ, ข้าม Stage 1) — แกลเลอรี `demo_samples/` 2 ภาพ/คลาส ขึ้นก่อน
+- **3 แท็บรับภาพ:** อัปโหลด/วาง · ถ่ายจากกล้อง · **เรียลไทม์ (ส่องหน้าจอ)** — `getDisplayMedia` แชร์หน้าจอ → ตรวจสดทุก ~0.35 วิ, วาดกรอบ + แผงไล่ทั้ง 8 ชนิดพร้อม % (ข้าม Stage 1) + คำอธิบายการอ่านผล/ข้อจำกัดใต้แผง · ต้อง https/localhost — แกลเลอรี `demo_samples/` 2 ภาพ/คลาส ขึ้นก่อน
 - แสดง: การ์ดสรุปผล + ตารางรายการตำหนิ (เรียงตามความเสี่ยง) + **กล่องสาเหตุที่พบบ่อย + คำแนะนำ ต่อชนิดที่เจอ**
   (ข้อมูลอ้างอิงทั่วไป ไม่ใช่วินิจฉัยชิ้นงาน) + ภาพผลลัพธ์ · ดาวน์โหลดผล (zip) + เก็บ feedback ลง `demo_logs/`
 - Stage 1 ยังทำงานเบื้องหลัง (fallback + cross-region NMS แบบเดียวกับ `pipeline.py`) แต่ไม่โชว์ภาพ metal region แล้ว

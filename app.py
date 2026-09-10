@@ -231,15 +231,27 @@ def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multisca
 _C_OK, _C_MAYBE = (68, 68, 239), (11, 158, 245)   # BGR ~ #ef4444 / #f59e0b
 
 
+_ALL_TH = [P.DEFECT_INFO[c]["name_th"] for c in P.DEFECT_CLASSES]   # 8 ชื่อไทย ตามลำดับคลาส
+
+
 def _rt_card(n, found, err=None):
-    """การ์ดสรุปสดของโหมดเรียลไทม์ — n < 0 = error, 0 = ยังไม่พบ, >0 = จำนวนตำหนิในเฟรม"""
+    """แผงผลสดโหมดเรียลไทม์ — โชว์ทั้ง 8 ชนิด + % ความมั่นใจสูงสุดในเฟรม (ชนิดที่มั่นใจสุด = ตัวหนา)
+    n < 0 = error, 0 = ยังไม่พบ, >0 = จำนวนกล่องตำหนิในเฟรม"""
     if err:
-        return f"<div class='rt-count rt-err'>ประมวลผลเฟรมไม่สำเร็จ: {err}</div>"
-    if not n:
-        return "<div class='rt-count rt-ok'>● ยังไม่พบตำหนิในเฟรม</div>"
-    lst = " · ".join(f"{k} {v:.0%}" for k, v in sorted(found.items(), key=lambda kv: -kv[1]))
-    return (f"<div class='rt-count rt-hit'>● พบตำหนิ <b>{n}</b> จุดในเฟรมนี้</div>"
-            f"<div class='rt-list'>{lst}</div>")
+        return f"<div class='rt-panel rt-err'>ประมวลผลเฟรมไม่สำเร็จ: {err}</div>"
+    head = ("● ยังไม่พบตำหนิในเฟรม" if not n
+            else f"● พบตำหนิ <b>{n}</b> จุด · {len(found)} ชนิด")
+    top = max(found, key=found.get) if found else None
+    rows = []
+    for th in _ALL_TH:
+        v = found.get(th, 0.0)
+        rows.append(
+            f"<div class='rt-row{' rt-row-on' if th == top else ''}'>"
+            f"<span class='rt-name'>{th}</span>"
+            f"<span class='rt-bar'><i style='width:{int(round(v * 100))}%'></i></span>"
+            f"<span class='rt-pct'>{f'{v:.0%}' if v else '—'}</span></div>")
+    return (f"<div class='rt-panel {'rt-hit' if n else 'rt-ok'}'>"
+            f"<div class='rt-head'>{head}</div>{''.join(rows)}</div>")
 
 
 def analyze_stream(frame_rgb):
@@ -277,18 +289,35 @@ def analyze_stream(frame_rgb):
 
 
 def analyze_screen(data_url):
-    """โหมดเรียลไทม์ (ส่องหน้าจอ): รับเฟรม data:URL จาก getDisplayMedia แล้วส่งเข้า analyze_stream"""
+    """โหมดเรียลไทม์ (ส่องหน้าจอ): รับเฟรม crop (data:URL) จาก getDisplayMedia
+    คืน (JSON กล่องที่เจอ [พิกัดในเฟรม crop], การ์ดสรุป 8 ชนิด) — JS เอาไปวาดทับวิดีโอสด"""
+    empty = json.dumps({"cw": 0, "ch": 0, "boxes": []})
     if not data_url or "," not in data_url:
-        return gr.update(), gr.update()
+        return empty, _rt_card(0, {})
     try:
         import base64
         raw = base64.b64decode(data_url.split(",", 1)[1])
         bgr = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
         if bgr is None:
-            return gr.update(), gr.update()
-        return analyze_stream(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+            return empty, _rt_card(0, {})
+        mk = next(iter(_available_models()), None)
+        _, s2, device = _ensure_models(mk)
+        cc = _STATE["class_conf"] or {}
+        dets = P.run_stage2(s2, bgr, _RAW_FLOOR, device, augment=False, class_conf=None)
+        boxes, found = [], {}
+        for d in dets:
+            if d["confidence"] < max(_RAW_FLOOR, cc.get(d["class"], 0.4)):
+                continue
+            x1, y1, x2, y2 = (int(v) for v in d["bbox_xyxy_crop"])
+            th = P.DEFECT_INFO[d["class"]]["name_th"]
+            boxes.append({"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
+                          "label": th, "conf": round(float(d["confidence"]), 2)})
+            found[th] = max(found.get(th, 0.0), d["confidence"])
+        ch, cw = bgr.shape[:2]
+        return (json.dumps({"cw": cw, "ch": ch, "boxes": boxes}),
+                _rt_card(len(boxes), found))
     except Exception as e:
-        return gr.update(), _rt_card(-1, {}, err=str(e))
+        return empty, _rt_card(-1, {}, err=str(e))
 
 
 def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multiscale, progress):
@@ -513,62 +542,217 @@ def submit_feedback(orig_rgb, annotated_rgb, state, rating, comment):
     return "ขอบคุณสำหรับ feedback — บันทึกแล้ว"
 
 
-# โหลดตอนเปิดหน้า — ตั้งโทนสี + เตรียมฟังก์ชัน "ส่องหน้าจอ" (screen capture) ของโหมดเรียลไทม์
-_JS_ONLOAD = """
+# โหลดตอนเปิดหน้า — ตั้งโทนสี + โหมด "ส่องหน้าจอ" เต็มจอ + กรอบเล็งกลางจอ (แนว app มือถือ)
+_JS_ONLOAD = (r"""
 () => {
+  const $ = id => document.getElementById(id);
+  const ALL = __ALL_TH__;   // 8 ชื่อไทยตามลำดับคลาส
   try {
     const s = localStorage.getItem('steeldemo_theme');
-    const dark = s ? s === 'dark'
-                   : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const dark = s ? s === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
     document.body.classList.toggle('dark', dark);
     document.querySelectorAll('gradio-app, .gradio-container')
             .forEach(e => e.classList.toggle('dark', dark));
   } catch (e) {}
 
-  // ถ้าเปิดแบบไม่ปลอดภัย (http บน LAN) — ส่องหน้าจอจะไม่ทำงาน แจ้งเตือนไว้ก่อน
-  try {
-    if (!window.isSecureContext) {
-      const w = document.getElementById('rt_warn');
-      if (w) w.style.display = 'block';
-    }
-  } catch (e) {}
+  const S = window.__ss = window.__ss || {stream:null, video:null, canvas:null, timer:null, busy:false};
 
-  if (!window.__ss) window.__ss = {stream:null, video:null, canvas:null, timer:null, busy:false};
+  // ปุ่ม start/stop/close ผูกแบบ delegation — ทำงานแม้แท็บเพิ่งเรนเดอร์
+  if (!window.__ssClickBound) {
+    window.__ssClickBound = true;
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      if (t.closest && t.closest('#ss_start')) {
+        e.preventDefault(); console.log('[steeldemo] ส่องหน้าจอ: คลิก'); window.__startScreen();
+      } else if (t.closest && (t.closest('#ss_stop') || t.closest('#rt_close'))) {
+        e.preventDefault(); window.__stopScreen();
+      }
+    }, true);
+  }
+
+  // กรอบเล็ง = สี่เหลี่ยม "ลากย้าย + ปรับขนาด" ได้ ทับได้ทั้งพื้นที่หน้าจอที่แชร์ (ตำแหน่งเก็บใน dataset px)
+  function applyScope() {
+    const sc = $('rt_scope'); if (!sc) return;
+    sc.style.left = (parseFloat(sc.dataset.x) || 0) + 'px';
+    sc.style.top = (parseFloat(sc.dataset.y) || 0) + 'px';
+    sc.style.width = (parseFloat(sc.dataset.w) || 120) + 'px';
+    sc.style.height = (parseFloat(sc.dataset.h) || 120) + 'px';
+  }
+  function clampScope() {
+    const st = $('rt_stage'), sc = $('rt_scope');
+    if (!st || !sc || !st.clientWidth) return;
+    const W = st.clientWidth, H = st.clientHeight;
+    let w = Math.max(60, Math.min(parseFloat(sc.dataset.w) || W * 0.5, W));
+    let h = Math.max(60, Math.min(parseFloat(sc.dataset.h) || H * 0.5, H));
+    let x = Math.max(0, Math.min(parseFloat(sc.dataset.x) || 0, W - w));
+    let y = Math.max(0, Math.min(parseFloat(sc.dataset.y) || 0, H - h));
+    sc.dataset.w = w; sc.dataset.h = h; sc.dataset.x = x; sc.dataset.y = y;
+    applyScope();
+  }
+  function resetScope() {
+    const st = $('rt_stage'), sc = $('rt_scope');
+    if (!st || !sc || !st.clientWidth) return;
+    const s = Math.round(Math.min(st.clientWidth, st.clientHeight) * 0.55);
+    sc.dataset.w = s; sc.dataset.h = s;
+    sc.dataset.x = Math.round((st.clientWidth - s) / 2);
+    sc.dataset.y = Math.round((st.clientHeight - s) / 2);
+    applyScope();
+  }
+  function initScopeDrag() {
+    const sc = $('rt_scope'); if (!sc || sc.__wired) return; sc.__wired = true;
+    let mode = null, px = 0, py = 0, ox = 0, oy = 0, ow = 0, oh = 0;
+    const pt = e => e.touches ? e.touches[0] : e;
+    const down = (e, m) => {
+      mode = m; const p = pt(e); px = p.clientX; py = p.clientY;
+      ox = parseFloat(sc.dataset.x) || 0; oy = parseFloat(sc.dataset.y) || 0;
+      ow = parseFloat(sc.dataset.w) || 0; oh = parseFloat(sc.dataset.h) || 0;
+      e.preventDefault(); e.stopPropagation();
+    };
+    const mv = e => {
+      if (!mode) return;
+      const p = pt(e), dx = p.clientX - px, dy = p.clientY - py;
+      if (mode === 'move') { sc.dataset.x = ox + dx; sc.dataset.y = oy + dy; }
+      else { sc.dataset.w = ow + dx; sc.dataset.h = oh + dy; }
+      clampScope(); e.preventDefault();
+    };
+    const up = () => { mode = null; };
+    sc.addEventListener('mousedown', e => { if (e.target === sc) down(e, 'move'); });
+    sc.addEventListener('touchstart', e => { if (e.target === sc) down(e, 'move'); }, {passive: false});
+    const h = sc.querySelector('.rt-scope-handle');
+    if (h) {
+      h.addEventListener('mousedown', e => down(e, 'resize'));
+      h.addEventListener('touchstart', e => down(e, 'resize'), {passive: false});
+    }
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('touchmove', mv, {passive: false});
+    window.addEventListener('mouseup', up);
+    window.addEventListener('touchend', up);
+  }
+  initScopeDrag();
+
+  // คืนพิกัดกรอบเทียบ "วิดีโอ" (พิกัดจริงของภาพ) และ "เวที" (พิกัดบนจอ)
+  function rectVsVideo() {
+    const sc = $('rt_scope'), v = S.video; if (!sc || !v || !v.videoWidth) return null;
+    const sr = sc.getBoundingClientRect(), vr = v.getBoundingClientRect();
+    if (!vr.width) return null;
+    const kx = v.videoWidth / vr.width, ky = v.videoHeight / vr.height;
+    let x = (sr.left - vr.left) * kx, y = (sr.top - vr.top) * ky;
+    let w = sr.width * kx, h = sr.height * ky;
+    x = Math.max(0, Math.min(x, v.videoWidth - 1)); y = Math.max(0, Math.min(y, v.videoHeight - 1));
+    w = Math.max(1, Math.min(w, v.videoWidth - x)); h = Math.max(1, Math.min(h, v.videoHeight - y));
+    return {x, y, w, h};
+  }
+  function rectVsStage() {
+    const sc = $('rt_scope'), st = $('rt_stage'); if (!sc || !st) return null;
+    const sr = sc.getBoundingClientRect(), gr = st.getBoundingClientRect();
+    return {x: sr.left - gr.left, y: sr.top - gr.top, w: sr.width, h: sr.height};
+  }
+
   window.__ssPush = () => {
-    const st = window.__ss;
-    if (!st.video || st.busy) return;
-    const w = st.video.videoWidth, h = st.video.videoHeight;
-    if (!w) return;
-    const k = Math.min(1, 960 / w);
-    st.canvas.width = Math.round(w * k); st.canvas.height = Math.round(h * k);
-    st.canvas.getContext('2d').drawImage(st.video, 0, 0, st.canvas.width, st.canvas.height);
-    const box = document.querySelector('#ss_frame textarea');
-    if (!box) return;
-    st.busy = true;
-    box.value = st.canvas.toDataURL('image/jpeg', 0.7);
+    if (!S.video || S.busy) return;
+    const box = document.querySelector('#ss_frame textarea'); if (!box) return;
+    const r = rectVsVideo(); if (!r) return;
+    const outW = Math.min(768, Math.max(1, Math.round(r.w))), k = outW / r.w;
+    S.canvas.width = outW; S.canvas.height = Math.max(1, Math.round(r.h * k));
+    S.canvas.getContext('2d').drawImage(S.video, r.x, r.y, r.w, r.h, 0, 0, S.canvas.width, S.canvas.height);
+    S.busy = true;
+    box.value = S.canvas.toDataURL('image/jpeg', 0.72);
     box.dispatchEvent(new Event('input', {bubbles: true}));
   };
+
   window.__startScreen = async () => {
+    const warn = $('rt_warn'), stage = $('rt_stage'), hint = $('rt_hint');
+    const fail = (msg) => {
+      if (warn) { warn.style.display = 'block'; warn.classList.add('rt-warn-hot'); }
+      if (hint) hint.textContent = msg || 'เปิดการส่องหน้าจอไม่สำเร็จ';
+    };
+    console.log('[steeldemo] __startScreen · secure=' + window.isSecureContext +
+                ' · api=' + !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia));
+    if (hint) hint.textContent = 'กำลังขอสิทธิ์แชร์หน้าจอ…';
+    if (stage) stage.style.display = 'block';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      fail('เบราว์เซอร์นี้ไม่รองรับการส่องหน้าจอ (ต้อง https/localhost + เบราว์เซอร์บนคอมพิวเตอร์)');
+      return;
+    }
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({video: {frameRate: 8}, audio: false});
       const v = document.createElement('video');
-      v.srcObject = s; v.muted = true; await v.play();
-      window.__ss = {stream:s, video:v, canvas:document.createElement('canvas'), timer:null, busy:false};
+      v.autoplay = true; v.muted = true; v.playsInline = true; v.srcObject = s;
+      await v.play();
+      const holder = $('rt_video_holder');
+      if (holder) { holder.innerHTML = ''; holder.appendChild(v); }
+      S.stream = s; S.video = v; S.canvas = document.createElement('canvas'); S.busy = false;
       s.getVideoTracks()[0].addEventListener('ended', () => window.__stopScreen());
-      window.__ss.timer = setInterval(window.__ssPush, 350);
+      if (stage) stage.classList.add('full');
+      try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch (e) {}
+      initScopeDrag();
+      setTimeout(resetScope, 280);                     // ตั้งกรอบไว้กลาง หลังเข้าเต็มจอ (เวทีได้ขนาดใหม่)
+      v.addEventListener('loadedmetadata', () => setTimeout(resetScope, 60));
+      if (S.timer) clearInterval(S.timer);
+      S.timer = setInterval(window.__ssPush, 900);
+      if (hint) hint.textContent = 'ลากกรอบไปครอบจุดที่จะตรวจ · มุมล่างขวา = ปรับขนาด';
+      if (warn) { warn.classList.remove('rt-warn-hot'); warn.style.display = 'none'; }
     } catch (e) {
-      alert('เปิดการส่องหน้าจอไม่ได้ — เบราว์เซอร์ต้องเป็น https หรือ localhost ' +
-            '(รัน python app.py --share) และต้องเป็นเบราว์เซอร์บนคอมพิวเตอร์');
+      console.warn('[steeldemo] getDisplayMedia error', e);
+      fail((e && e.name === 'NotAllowedError')
+           ? 'คุณยกเลิก หรือเบราว์เซอร์ปฏิเสธการแชร์หน้าจอ'
+           : 'ส่องหน้าจอไม่ได้ (' + (e && e.name || 'error') + ') — ต้อง https/localhost + เบราว์เซอร์บนคอมพิวเตอร์');
     }
   };
   window.__stopScreen = () => {
-    const st = window.__ss;
-    if (st.timer) clearInterval(st.timer);
-    if (st.stream) st.stream.getTracks().forEach(t => t.stop());
-    window.__ss = {stream:null, video:null, canvas:null, timer:null, busy:false};
+    if (S.timer) clearInterval(S.timer); S.timer = null;
+    if (S.stream) S.stream.getTracks().forEach(t => t.stop());
+    S.stream = null; S.video = null; S.canvas = null; S.busy = false;
+    const stage = $('rt_stage');
+    if (stage) { stage.style.display = 'none'; stage.classList.remove('full'); }
+    try { document.fullscreenElement && document.exitFullscreen(); } catch (e) {}
+    const holder = $('rt_video_holder'); if (holder) holder.innerHTML = '';
+    const cv = $('rt_overlay'); if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+    const ro = $('rt_readout'); if (ro) ro.innerHTML = '';
   };
+
+  // หลัง Python คืนผล — วาดกล่องแดงในกรอบ + อัปเดตแผงลิสต์ 8 ชนิด + ปลดล็อกเฟรมถัดไป
+  window.__ssDraw = () => {
+    if (S) S.busy = false;
+    const box = document.querySelector('#ss_result textarea');
+    const cv = $('rt_overlay'), stage = $('rt_stage');
+    if (!cv || !stage) return;
+    cv.width = stage.clientWidth; cv.height = stage.clientHeight;
+    const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
+    let data; try { data = JSON.parse((box && box.value) || '{}'); } catch (e) { return; }
+    const rs = rectVsStage();
+    const found = {};
+    if (data.boxes && data.cw && rs) {
+      const rx = rs.w / data.cw, ry = rs.h / data.ch;
+      g.lineWidth = 2.5; g.font = '600 13px system-ui, -apple-system, sans-serif'; g.textBaseline = 'top';
+      data.boxes.forEach(b => {
+        found[b.label] = Math.max(found[b.label] || 0, b.conf);
+        const X = rs.x + b.x * rx, Y = rs.y + b.y * ry, W = b.w * rx, H = b.h * ry;
+        g.strokeStyle = '#ef4444'; g.strokeRect(X, Y, W, H);
+        const t = b.label + ' ' + Math.round(b.conf * 100) + '% · ' + b.w + '×' + b.h;
+        const tw = g.measureText(t).width + 10, ty = Y - 19 >= 0 ? Y - 19 : Y + 2;
+        g.fillStyle = 'rgba(0,0,0,.74)'; g.fillRect(X, ty, tw, 18);
+        g.fillStyle = '#fff'; g.fillText(t, X + 5, ty + 3);
+      });
+    }
+    const ro = $('rt_readout');
+    if (ro) {
+      const n = (data.boxes || []).length;
+      let top = null, mx = 0;
+      ALL.forEach(k => { const val = found[k] || 0; if (val > mx) { mx = val; top = k; } });
+      ro.innerHTML =
+        '<div class="rt-ro-head">' + (n ? ('พบตำหนิ ' + n + ' จุด') : 'ยังไม่พบตำหนิในกรอบ') + '</div>' +
+        ALL.map(k => {
+          const val = found[k] || 0, on = (k === top && val > 0);
+          return '<div class="rt-ro-row' + (on ? ' on' : '') + '"><span>' + k + '</span><span>' +
+                 (val ? Math.round(val * 100) + '%' : '—') + '</span></div>';
+        }).join('');
+    }
+  };
+
+  try { if (!window.isSecureContext) { const w = $('rt_warn'); if (w) w.style.display = 'block'; } } catch (e) {}
 }
-"""
+""").replace("__ALL_TH__", json.dumps(_ALL_TH, ensure_ascii=False))
 # ปุ่มสลับโทนสว่าง/มืด
 _JS_TOGGLE = """
 () => {
@@ -580,7 +764,7 @@ _JS_TOGGLE = """
 }
 """
 # หลัง Python ประมวลผลเฟรมส่องหน้าจอเสร็จ -> ปลดล็อกให้ส่งเฟรมถัดไป (backpressure)
-_JS_SS_DONE = "() => { if (window.__ss) window.__ss.busy = false; }"
+_JS_SS_DRAW = "() => window.__ssDraw && window.__ssDraw()"
 
 _CSS = """
 :root{
@@ -660,17 +844,54 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .causes-risk{font-size:12.5px;color:var(--fg-3);margin-left:8px}
 .causes-adv{color:var(--fg-3);margin-top:3px}
 /* เรียลไทม์ */
-#ss_frame{display:none!important}
+#ss_frame, #ss_result{display:none!important}
 .rt-warn{border:1px solid #fcd9b0;background:#fff7ec;color:#8a4b12;border-radius:10px;
     padding:11px 15px;margin:6px 2px 10px;font-size:13px;line-height:1.7}
 .rt-warn code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:4px;font-size:12px}
-.rt-count{font-size:17px;font-weight:800;padding:12px 16px;border-radius:12px;
-    border:1px solid var(--border);border-left:5px solid var(--border);
-    background:var(--card);margin-top:8px}
-.rt-count.rt-ok{border-left-color:#22c55e;color:#16a34a}
-.rt-count.rt-hit{border-left-color:#ef4444;color:#dc2626}
-.rt-count.rt-err{border-left-color:#f59e0b;color:#b45309;font-size:13px;font-weight:600}
-.rt-list{font-size:14px;color:var(--fg-2);margin-top:6px;padding:0 4px}
+.rt-warn.rt-warn-hot{border-color:#ef4444;background:#fef2f2;color:#b91c1c;font-weight:600}
+/* พื้นที่แชร์หน้าจอ + กรอบเลือกพื้นที่ (ลาก/ย่อขยายได้) */
+.rt-stage{position:relative;margin-top:10px;border-radius:12px;overflow:hidden;
+    background:#000;border:1px solid var(--border);user-select:none;touch-action:none}
+#rt_video_holder video{width:100%;display:block;max-height:66vh;object-fit:contain;background:#000}
+/* เต็มจอ — ให้รู้สึกเหมือนส่องกล้องบนเดสก์ท็อปจริง (แนว app มือถือ) */
+.rt-stage.full{position:fixed;inset:0;z-index:2147483000;margin:0;border:0;border-radius:0}
+.rt-stage.full #rt_video_holder video{width:100vw;height:100vh;max-height:none;object-fit:contain}
+.rt-overlay{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
+/* กรอบเล็ง — ลากย้าย + ปรับขนาดได้ ทับได้ทั้งพื้นที่หน้าจอที่แชร์ นอกกรอบมืดลง */
+.rt-scope{position:absolute;left:20%;top:20%;width:56%;height:56%;box-sizing:border-box;z-index:2;
+    cursor:move;touch-action:none;border:2px solid #22d3ee;box-shadow:0 0 0 9999px rgba(0,0,0,.42)}
+.rt-scope-handle{position:absolute;right:-12px;bottom:-12px;width:24px;height:24px;
+    background:#22d3ee;border:3px solid #fff;border-radius:6px;cursor:se-resize;touch-action:none}
+.rt-readout{position:absolute;left:12px;top:46px;z-index:4;min-width:210px;max-width:72vw;
+    background:rgba(0,0,0,.62);border-radius:10px;padding:10px 12px;pointer-events:none;
+    font-family:ui-monospace,Menlo,Consolas,monospace;color:#fff}
+.rt-ro-head{font-size:13px;font-weight:800;margin-bottom:6px}
+.rt-ro-row{display:flex;justify-content:space-between;gap:18px;font-size:12.5px;padding:1px 0;color:#c3ccd8}
+.rt-ro-row.on{color:#22d3ee;font-weight:800}
+.rt-bar{position:absolute;left:0;right:0;top:0;z-index:5;display:flex;align-items:center;gap:12px;
+    padding:8px 12px;background:linear-gradient(rgba(0,0,0,.72),rgba(0,0,0,0));color:#fff;font-size:12.5px}
+.rt-bar #rt_hint{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt-close{margin-left:auto;background:#ef4444;color:#fff;border:0;border-radius:8px;
+    padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer}
+/* แผงผลสด — สไตล์เดียวกับ overlay ในแอปมือถือ (ลิสต์ทุกชนิด + แถบ %) */
+.rt-panel{border:1px solid var(--border);border-left:5px solid var(--border);
+    border-radius:12px;background:var(--card);padding:12px 14px;margin-top:8px}
+.rt-panel.rt-ok{border-left-color:#22c55e}
+.rt-panel.rt-hit{border-left-color:#ef4444}
+.rt-panel.rt-err{border-left-color:#f59e0b;color:#b45309;font-size:13px;font-weight:600;padding:12px 16px}
+.rt-head{font-size:15px;font-weight:800;color:var(--fg);margin-bottom:8px}
+.rt-panel.rt-ok .rt-head{color:#16a34a}
+.rt-panel.rt-hit .rt-head{color:#dc2626}
+.rt-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;color:var(--fg-3)}
+.rt-name{flex:0 0 128px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.rt-bar{flex:1;height:8px;border-radius:5px;background:var(--surface);overflow:hidden}
+.rt-bar>i{display:block;height:100%;background:#cbd5e1;transition:width .2s}
+.rt-pct{flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums}
+.rt-row-on{color:var(--fg);font-weight:800}
+.rt-row-on .rt-bar>i{background:#ef4444}
+.rt-desc{border:1px solid var(--border);background:var(--surface);border-radius:12px;
+    padding:13px 16px;margin-top:12px;font-size:13px;color:var(--fg-3);line-height:1.7}
+.rt-desc b{color:var(--fg-2)}
 /* feedback */
 .fb{border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-top:12px;background:var(--card)}
 .fb-h{font-size:14.5px;font-weight:800;color:var(--fg);margin-bottom:4px}
@@ -744,21 +965,46 @@ def build_ui():
 
             with gr.Tab("เรียลไทม์ (ส่องหน้าจอ)"):
                 gr.HTML(
-                    "<div class='hint'>กด <b>ส่องหน้าจอ</b> แล้วเลือกหน้าต่าง/แท็บที่จะให้ตรวจ — "
-                    "ระบบวาดกรอบ + นับตำหนิสดทุก ~0.35 วินาที (Stage 2 บนเฟรมเต็ม ข้าม Stage 1)</div>"
+                    "<div class='hint'>กด <b>ส่องหน้าจอ</b> → เลือกหน้าจอที่จะแชร์ → ภาพขึ้น<b>เต็มจอ</b> "
+                    "พร้อม<b>กรอบสีฟ้า</b>ที่<b>ลากย้าย + ปรับขนาดได้</b> (ลากตัวกรอบ = ย้าย · ลากปุ่มมุมล่างขวา = ปรับขนาด) "
+                    "→ วางกรอบครอบจุดไหนก็ได้บนหน้าจอที่แชร์ · ระบบตรวจเฉพาะในกรอบทุก ~0.9 วินาที "
+                    "วาดกรอบแดง + ไล่ผล 8 ชนิดที่มุมซ้ายบน (ข้าม Stage 1)</div>"
                     "<div id='rt_warn' class='rt-warn' style='display:none'>"
-                    "⚠️ หน้านี้เปิดแบบ <b>http</b> — เบราว์เซอร์จะไม่ยอมให้ส่องหน้าจอ<br>"
-                    "วิธีแก้: รัน <code>python app.py --share</code> แล้วเปิดลิงก์ <code>https://…gradio.live</code> · "
-                    "หรือเปิดที่ <code>http://127.0.0.1:7860</code> บนเครื่องนี้ · "
-                    "หรือตั้ง flag <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> "
-                    "= ที่อยู่นี้ แล้วรีสตาร์ตเบราว์เซอร์</div>")
+                    "⚠️ <b>ส่องหน้าจอไม่ได้</b> — เบราว์เซอร์ยอมให้ทำเฉพาะหน้าที่เป็น <b>https</b> หรือ <b>localhost</b><br>"
+                    "• รัน <code>python app.py --share</code> แล้วเปิดลิงก์ <code>https://…gradio.live</code><br>"
+                    "• หรือเปิด <code>http://127.0.0.1:7860</code> บนเครื่องนี้โดยตรง<br>"
+                    "• หรือใน Chrome: <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> "
+                    "→ ใส่ <code>http://192.168.1.102:7860</code> → Enabled → รีสตาร์ตเบราว์เซอร์</div>")
                 with gr.Row():
-                    ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="lg")
-                    ss_stop = gr.Button("■ หยุด", size="lg")
-                ss_frame = gr.Textbox(elem_id="ss_frame")   # ซ่อนด้วย CSS — รับ data:URL จาก JS
-                rt_out = gr.Image(type="numpy", label="ผลตรวจสด", interactive=False,
-                                  elem_classes=["result-img"])
+                    ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="lg",
+                                         elem_id="ss_start")
+                    ss_stop = gr.Button("■ หยุด", size="lg", elem_id="ss_stop")
+                ss_frame = gr.Textbox(elem_id="ss_frame")     # ซ่อน — รับ data:URL (crop) จาก JS
+                ss_result = gr.Textbox(elem_id="ss_result")   # ซ่อน — JSON กล่องที่เจอ ให้ JS วาดทับวิดีโอ
+                gr.HTML(
+                    "<div id='rt_stage' class='rt-stage' style='display:none'>"
+                    "<div id='rt_video_holder'></div>"
+                    "<canvas id='rt_overlay' class='rt-overlay'></canvas>"
+                    "<div id='rt_scope' class='rt-scope'><div class='rt-scope-handle'></div></div>"
+                    "<div id='rt_readout' class='rt-readout'></div>"
+                    "<div class='rt-bar'>"
+                    "<span id='rt_hint'>ลากกรอบไปครอบจุดที่จะตรวจ · มุมล่างขวา = ปรับขนาด</span>"
+                    "<button id='rt_close' class='rt-close'>✕ ปิด</button>"
+                    "</div>"
+                    "</div>")
                 rt_txt = gr.HTML(_rt_card(0, {}))
+                gr.HTML(
+                    "<div class='rt-desc'>"
+                    "<b>โหมดนี้ทำอะไร</b> — ส่องหน้าจอเต็มจอ + กรอบสีฟ้าลาก/ปรับขนาดได้ · ครอปเฉพาะในกรอบทุก ~0.9 วินาที "
+                    "แล้วให้ Stage 2 (YOLO11n) ตรวจตำหนิ โดย<b>ข้าม Stage 1</b> (ไม่หาพื้นที่เหล็กก่อน) เพื่อให้เร็วพอดูสด<br>"
+                    "<b>อ่านผลยังไง</b> — กรอบแดง + ป้าย “ชื่อ NN% · กว้าง×สูง(px)” บนภาพสด · "
+                    "แผงมุมซ้ายบนไล่ทั้ง 8 ชนิด ตัวเลข % = ความมั่นใจสูงสุดของชนิดนั้นในเฟรมปัจจุบัน · "
+                    "ชนิดที่มั่นใจสุด = ตัวฟ้า/ตัวหนา · “—” = ไม่พบในเฟรมนี้<br>"
+                    "<b>ข้อจำกัด</b> — โมเดลชุดนี้แม่นเรื่อง<b>สนิม</b>ที่สุด อีก 7 ชนิดบนภาพถ่ายจริงยังพลาดได้บ่อย · "
+                    "เฟรมเบลอ/สั่น/แสงน้อย/ย่อเล็กมาก ทำให้เตือนผิดหรือพลาดได้ · "
+                    "ผลเรียลไทม์เป็นแค่การส่องดูคร่าว ๆ — ให้ยึดผลจากแท็บ “อัปโหลดภาพ” (มี Stage 1 + การจัดระดับความเสี่ยง) เป็นหลัก<br>"
+                    "<b>ต้องเปิดผ่าน https หรือ localhost</b> เท่านั้น การส่องหน้าจอถึงจะทำงาน (ดูกรอบเตือนด้านบนถ้าใช้ไม่ได้)"
+                    "</div>")
 
         # ===== ผลตรวจ (โหมด อัปโหลด + ถ่ายภาพ) =====
         with gr.Row(equal_height=False):
@@ -815,11 +1061,13 @@ def build_ui():
         fb_send.click(submit_feedback,
                       inputs=[cur_in, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
 
-        # โหมดเรียลไทม์ — ส่องหน้าจอ (config คงที่เดียวกับหน้าอัปโหลด)
-        ss_start.click(fn=None, js="() => window.__startScreen()")
-        ss_stop.click(fn=None, js="() => window.__stopScreen()")
-        ss_frame.change(analyze_screen, inputs=[ss_frame], outputs=[rt_out, rt_txt],
-                        show_progress="hidden", concurrency_limit=1).then(fn=None, js=_JS_SS_DONE)
+        # โหมดเรียลไทม์ — ส่องหน้าจอ. ปุ่มผูกผ่าน click delegation ใน _JS_ONLOAD (กันแท็บ lazy-render)
+        # ทาง .click(js=) ไว้เป็นทางสำรอง
+        ss_start.click(fn=None, js="() => window.__startScreen && window.__startScreen()")
+        ss_stop.click(fn=None, js="() => window.__stopScreen && window.__stopScreen()")
+        ss_frame.change(analyze_screen, inputs=[ss_frame], outputs=[ss_result, rt_txt],
+                        show_progress="hidden", concurrency_limit=1).then(fn=None, js=_JS_SS_DRAW)
+        demo.load(fn=None, js=_JS_ONLOAD)   # สำรอง เผื่อ Blocks(js=) ไม่ทำงานในบางเวอร์ชัน
     return demo
 
 
