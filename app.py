@@ -550,6 +550,15 @@ _JS_ONLOAD = (r"""
         e.preventDefault(); console.log('[steeldemo] ส่องหน้าจอ: คลิก'); window.__startScreen();
       } else if (t.closest && t.closest('#ss_stop')) {
         e.preventDefault(); window.__stopScreen();
+      } else if (t.closest && t.closest('#ss_expand')) {
+        e.preventDefault();
+        const st = $('rt_stage'); if (!st) return;
+        const big = st.classList.toggle('big');
+        try {
+          if (big && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+          else if (!big && document.fullscreenElement) document.exitFullscreen();
+        } catch (err) {}
+        setTimeout(() => { if (window.__resetScope) window.__resetScope(); }, 260);
       }
     }, true);
   }
@@ -576,12 +585,13 @@ _JS_ONLOAD = (r"""
   function resetScope() {
     const st = $('rt_stage'), sc = $('rt_scope');
     if (!st || !sc || !st.clientWidth) return;
-    const s = Math.round(Math.min(st.clientWidth, st.clientHeight) * 0.55);
+    const s = Math.round(Math.min(st.clientWidth, st.clientHeight) * 0.38);
     sc.dataset.w = s; sc.dataset.h = s;
     sc.dataset.x = Math.round((st.clientWidth - s) / 2);
     sc.dataset.y = Math.round((st.clientHeight - s) / 2);
     applyScope();
   }
+  window.__resetScope = resetScope;
   function initScopeDrag() {
     const sc = $('rt_scope'); if (!sc || sc.__wired) return; sc.__wired = true;
     let mode = null, px = 0, py = 0, ox = 0, oy = 0, ow = 0, oh = 0;
@@ -687,7 +697,9 @@ _JS_ONLOAD = (r"""
     if (S.timer) clearInterval(S.timer); S.timer = null;
     if (S.stream) S.stream.getTracks().forEach(t => t.stop());
     S.stream = null; S.video = null; S.canvas = null; S.busy = false;
-    const stage = $('rt_stage'); if (stage) stage.style.display = 'none';
+    const stage = $('rt_stage');
+    if (stage) { stage.style.display = 'none'; stage.classList.remove('big'); }
+    try { document.fullscreenElement && document.exitFullscreen(); } catch (e) {}
     const holder = $('rt_video_holder'); if (holder) holder.innerHTML = '';
   };
 
@@ -790,10 +802,13 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
     padding:11px 15px;margin:6px 2px 10px;font-size:13px;line-height:1.7}
 .rt-warn code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:4px;font-size:12px}
 .rt-warn.rt-warn-hot{border-color:#ef4444;background:#fef2f2;color:#b91c1c;font-weight:600}
-/* พรีวิวหน้าจอที่แชร์ + กรอบเล็ง (ลากย้าย/ปรับขนาดได้) — อยู่ในหน้า ไม่เต็มจอ */
+/* พรีวิวหน้าจอที่แชร์ + กรอบเล็ง (ลากย้าย/ปรับขนาดได้) */
 .rt-stage{position:relative;margin-top:10px;border-radius:12px;overflow:hidden;
     background:#000;border:1px solid var(--border);user-select:none}
-#rt_video_holder video{width:100%;display:block;max-height:44vh;object-fit:contain;background:#000}
+#rt_video_holder video{width:100%;display:block;max-height:76vh;object-fit:contain;background:#000}
+/* ปุ่ม "ขยายเต็มจอ" — พรีวิวคลุมทั้งหน้าต่าง เล็งกรอบได้ละเอียด */
+.rt-stage.big{position:fixed;inset:0;z-index:2147483000;margin:0;border:0;border-radius:0}
+.rt-stage.big #rt_video_holder video{width:100vw;height:100vh;max-height:none;object-fit:contain}
 .rt-scope{position:absolute;left:20%;top:20%;width:56%;height:56%;box-sizing:border-box;z-index:2;
     cursor:move;touch-action:none;border:2px solid #22d3ee;box-shadow:0 0 0 9999px rgba(0,0,0,.42)}
 .rt-scope-handle{position:absolute;right:-12px;bottom:-12px;width:24px;height:24px;
@@ -892,9 +907,10 @@ def build_ui():
 
             with gr.Tab("เรียลไทม์ (ส่องหน้าจอ)"):
                 gr.HTML(
-                    "<div class='hint'>สำหรับใช้ <b>2 แท็บ</b> — แท็บอื่นเปิดภาพเหล็กที่จะทดสอบ · แท็บนี้แสดงผลตรวจสด · "
-                    "กด <b>ส่องหน้าจอ</b> → เลือก “ทั้งหน้าจอ” → พรีวิวขึ้นด้านล่าง พร้อม<b>กรอบสีฟ้าลากย้าย/ปรับขนาดได้</b> "
-                    "→ เลื่อนกรอบไปครอบภาพเหล็ก · ตรวจในกรอบทุก ~0.9 วินาที (ข้าม Stage 1)</div>"
+                    "<div class='hint'>สำหรับใช้ <b>2 หน้าต่าง/แท็บ</b> — หน้าต่างหนึ่งเปิดภาพเหล็ก · แท็บนี้แสดงผลตรวจสด<br>"
+                    "กด <b>ส่องหน้าจอ</b> → เลือก “ทั้งหน้าจอ” → <b>พรีวิวทั้งจอ</b>ขึ้นในหน้านี้ (เห็นทุกหน้าต่างรวมถึงภาพเหล็ก) "
+                    "→ <b>ลากกรอบสีฟ้า</b>ไปวางบนภาพเหล็กในพรีวิว (ลากตัวกรอบ=ย้าย · มุมล่างขวา=ปรับขนาด) · "
+                    "กด <b>⛶ ขยาย/ย่อพรีวิว</b> ให้พรีวิวเต็มหน้าต่างเพื่อเล็งละเอียด · ตรวจในกรอบทุก ~0.9 วินาที</div>"
                     "<div id='rt_warn' class='rt-warn' style='display:none'>"
                     "⚠️ <b>ส่องหน้าจอไม่ได้</b> — เบราว์เซอร์ยอมให้ทำเฉพาะหน้าที่เป็น <b>https</b> หรือ <b>localhost</b><br>"
                     "• รัน <code>python app.py --share</code> แล้วเปิดลิงก์ <code>https://…gradio.live</code><br>"
@@ -904,6 +920,7 @@ def build_ui():
                 with gr.Row():
                     ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="lg",
                                          elem_id="ss_start")
+                    ss_expand = gr.Button("⛶ ขยาย/ย่อพรีวิว", size="lg", elem_id="ss_expand")
                     ss_stop = gr.Button("■ หยุด", size="lg", elem_id="ss_stop")
                 ss_frame = gr.Textbox(elem_id="ss_frame")     # ซ่อน — รับ data:URL (crop) จาก JS
                 gr.HTML(
