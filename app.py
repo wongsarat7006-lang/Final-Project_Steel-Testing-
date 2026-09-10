@@ -542,10 +542,11 @@ def submit_feedback(orig_rgb, annotated_rgb, state, rating, comment):
     return "ขอบคุณสำหรับ feedback — บันทึกแล้ว"
 
 
-# โหลดตอนเปิดหน้า — ตั้งโทนสี + เตรียมโหมด "ส่องหน้าจอ" (แชร์หน้าจอ + กรอบเลือกพื้นที่ลากได้)
-_JS_ONLOAD = r"""
+# โหลดตอนเปิดหน้า — ตั้งโทนสี + โหมด "ส่องหน้าจอ" เต็มจอ + กรอบเล็งกลางจอ (แนว app มือถือ)
+_JS_ONLOAD = (r"""
 () => {
   const $ = id => document.getElementById(id);
+  const ALL = __ALL_TH__;   // 8 ชื่อไทยตามลำดับคลาส
   try {
     const s = localStorage.getItem('steeldemo_theme');
     const dark = s ? s === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -556,54 +557,7 @@ _JS_ONLOAD = r"""
 
   const S = window.__ss = window.__ss || {stream:null, video:null, canvas:null, timer:null, busy:false};
 
-  function clampScope() {
-    const stage = $('rt_stage'), sc = $('rt_scope');
-    if (!stage || !sc || !stage.clientWidth) return;
-    const W = stage.clientWidth, H = stage.clientHeight;
-    let w = parseFloat(sc.dataset.w) || Math.round(W * 0.55);
-    let h = parseFloat(sc.dataset.h) || Math.round(H * 0.55);
-    let x = sc.dataset.x !== undefined ? parseFloat(sc.dataset.x) : Math.round((W - w) / 2);
-    let y = sc.dataset.y !== undefined ? parseFloat(sc.dataset.y) : Math.round((H - h) / 2);
-    w = Math.max(48, Math.min(w, W)); h = Math.max(48, Math.min(h, H));
-    x = Math.max(0, Math.min(x, W - w)); y = Math.max(0, Math.min(y, H - h));
-    sc.dataset.x = x; sc.dataset.y = y; sc.dataset.w = w; sc.dataset.h = h;
-    sc.style.left = x + 'px'; sc.style.top = y + 'px';
-    sc.style.width = w + 'px'; sc.style.height = h + 'px';
-  }
-  function initScopeDrag() {
-    const sc = $('rt_scope'); if (!sc || sc.__wired) return; sc.__wired = true;
-    let mode = null, sx = 0, sy = 0, ox = 0, oy = 0, ow = 0, oh = 0;
-    const start = (e, m) => {
-      mode = m; const p = e.touches ? e.touches[0] : e;
-      sx = p.clientX; sy = p.clientY;
-      ox = parseFloat(sc.dataset.x) || 0; oy = parseFloat(sc.dataset.y) || 0;
-      ow = parseFloat(sc.dataset.w) || 0; oh = parseFloat(sc.dataset.h) || 0;
-      e.preventDefault(); e.stopPropagation();
-    };
-    const move = e => {
-      if (!mode) return;
-      const p = e.touches ? e.touches[0] : e;
-      const dx = p.clientX - sx, dy = p.clientY - sy;
-      if (mode === 'move') { sc.dataset.x = ox + dx; sc.dataset.y = oy + dy; }
-      else { sc.dataset.w = ow + dx; sc.dataset.h = oh + dy; }
-      clampScope();
-    };
-    const end = () => { mode = null; };
-    sc.addEventListener('mousedown', e => { if (e.target === sc) start(e, 'move'); });
-    sc.addEventListener('touchstart', e => { if (e.target === sc) start(e, 'move'); }, {passive:false});
-    const hnd = sc.querySelector('.rt-scope-handle');
-    if (hnd) {
-      hnd.addEventListener('mousedown', e => start(e, 'resize'));
-      hnd.addEventListener('touchstart', e => start(e, 'resize'), {passive:false});
-    }
-    window.addEventListener('mousemove', move);
-    window.addEventListener('touchmove', move, {passive:false});
-    window.addEventListener('mouseup', end);
-    window.addEventListener('touchend', end);
-  }
-  initScopeDrag();
-
-  // ผูกปุ่มแบบ delegation ที่ document — ทำงานแม้ปุ่มถูกเรนเดอร์ทีหลัง (แท็บยังไม่เคยเปิด)
+  // ปุ่ม start/stop/close ผูกแบบ delegation — ทำงานแม้แท็บเพิ่งเรนเดอร์
   if (!window.__ssClickBound) {
     window.__ssClickBound = true;
     document.addEventListener('click', (e) => {
@@ -616,22 +570,31 @@ _JS_ONLOAD = r"""
     }, true);
   }
 
+  // กรอบเล็ง = สี่เหลี่ยมกลางจอตายตัว (CSS จัดตำแหน่ง) — คืนพิกัดกรอบเทียบ "วิดีโอ" และ "เวที"
+  function rectVsVideo() {
+    const sc = $('rt_scope'), v = S.video; if (!sc || !v || !v.videoWidth) return null;
+    const sr = sc.getBoundingClientRect(), vr = v.getBoundingClientRect();
+    if (!vr.width) return null;
+    const kx = v.videoWidth / vr.width, ky = v.videoHeight / vr.height;
+    let x = (sr.left - vr.left) * kx, y = (sr.top - vr.top) * ky;
+    let w = sr.width * kx, h = sr.height * ky;
+    x = Math.max(0, Math.min(x, v.videoWidth - 1)); y = Math.max(0, Math.min(y, v.videoHeight - 1));
+    w = Math.max(1, Math.min(w, v.videoWidth - x)); h = Math.max(1, Math.min(h, v.videoHeight - y));
+    return {x, y, w, h};
+  }
+  function rectVsStage() {
+    const sc = $('rt_scope'), st = $('rt_stage'); if (!sc || !st) return null;
+    const sr = sc.getBoundingClientRect(), gr = st.getBoundingClientRect();
+    return {x: sr.left - gr.left, y: sr.top - gr.top, w: sr.width, h: sr.height};
+  }
+
   window.__ssPush = () => {
     if (!S.video || S.busy) return;
-    const stage = $('rt_stage'), sc = $('rt_scope'), box = document.querySelector('#ss_frame textarea');
-    if (!stage || !sc || !box) return;
-    const vw = S.video.videoWidth, vh = S.video.videoHeight;
-    if (!vw || !stage.clientWidth) return;
-    const kx = vw / stage.clientWidth, ky = vh / stage.clientHeight;
-    const x = (parseFloat(sc.dataset.x) || 0) * kx;
-    const y = (parseFloat(sc.dataset.y) || 0) * ky;
-    const w = (parseFloat(sc.dataset.w) || stage.clientWidth) * kx;
-    const h = (parseFloat(sc.dataset.h) || stage.clientHeight) * ky;
-    const outW = Math.min(900, Math.max(1, Math.round(w)));
-    const sc2 = outW / w;
-    S.canvas.width = outW;
-    S.canvas.height = Math.max(1, Math.round(h * sc2));
-    S.canvas.getContext('2d').drawImage(S.video, x, y, w, h, 0, 0, S.canvas.width, S.canvas.height);
+    const box = document.querySelector('#ss_frame textarea'); if (!box) return;
+    const r = rectVsVideo(); if (!r) return;
+    const outW = Math.min(768, Math.max(1, Math.round(r.w))), k = outW / r.w;
+    S.canvas.width = outW; S.canvas.height = Math.max(1, Math.round(r.h * k));
+    S.canvas.getContext('2d').drawImage(S.video, r.x, r.y, r.w, r.h, 0, 0, S.canvas.width, S.canvas.height);
     S.busy = true;
     box.value = S.canvas.toDataURL('image/jpeg', 0.72);
     box.dispatchEvent(new Event('input', {bubbles: true}));
@@ -643,7 +606,7 @@ _JS_ONLOAD = r"""
       if (warn) { warn.style.display = 'block'; warn.classList.add('rt-warn-hot'); }
       if (hint) hint.textContent = msg || 'เปิดการส่องหน้าจอไม่สำเร็จ';
     };
-    console.log('[steeldemo] __startScreen เริ่ม · secure=' + window.isSecureContext +
+    console.log('[steeldemo] __startScreen · secure=' + window.isSecureContext +
                 ' · api=' + !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia));
     if (hint) hint.textContent = 'กำลังขอสิทธิ์แชร์หน้าจอ…';
     if (stage) stage.style.display = 'block';
@@ -660,18 +623,12 @@ _JS_ONLOAD = r"""
       if (holder) { holder.innerHTML = ''; holder.appendChild(v); }
       S.stream = s; S.video = v; S.canvas = document.createElement('canvas'); S.busy = false;
       s.getVideoTracks()[0].addEventListener('ended', () => window.__stopScreen());
-      const sc = $('rt_scope');
-      if (sc) { delete sc.dataset.x; delete sc.dataset.y; delete sc.dataset.w; delete sc.dataset.h; }
-      initScopeDrag();
-      v.addEventListener('loadedmetadata', clampScope);
-      setTimeout(clampScope, 120);
-      if (S.timer) clearInterval(S.timer);
-      S.timer = setInterval(window.__ssPush, 400);
-      if (hint) hint.textContent = 'ลากกรอบไปครอบจุดที่จะตรวจ · มุมล่างขวา = ย่อ/ขยาย';
-      if (warn) { warn.classList.remove('rt-warn-hot'); warn.style.display = 'none'; }
-      if (stage) stage.classList.add('full');           // เต็มจอ — เหมือนส่องบนเดสก์ท็อปจริง
+      if (stage) stage.classList.add('full');
       try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch (e) {}
-      setTimeout(clampScope, 260);
+      if (S.timer) clearInterval(S.timer);
+      S.timer = setInterval(window.__ssPush, 900);
+      if (hint) hint.textContent = 'เล็งให้ตำหนิอยู่ในกรอบสีฟ้ากลางจอ';
+      if (warn) { warn.classList.remove('rt-warn-hot'); warn.style.display = 'none'; }
     } catch (e) {
       console.warn('[steeldemo] getDisplayMedia error', e);
       fail((e && e.name === 'NotAllowedError')
@@ -688,47 +645,51 @@ _JS_ONLOAD = r"""
     try { document.fullscreenElement && document.exitFullscreen(); } catch (e) {}
     const holder = $('rt_video_holder'); if (holder) holder.innerHTML = '';
     const cv = $('rt_overlay'); if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
-    const sum = $('rt_live_summary'); if (sum) sum.textContent = '';
+    const ro = $('rt_readout'); if (ro) ro.innerHTML = '';
   };
 
-  // เรียกหลัง Python คืนผล — วาดกล่องที่เจอทับวิดีโอสด + ปลดล็อกเฟรมถัดไป
+  // หลัง Python คืนผล — วาดกล่องแดงในกรอบ + อัปเดตแผงลิสต์ 8 ชนิด + ปลดล็อกเฟรมถัดไป
   window.__ssDraw = () => {
     if (S) S.busy = false;
     const box = document.querySelector('#ss_result textarea');
-    const cv = $('rt_overlay'), sc = $('rt_scope'), stage = $('rt_stage');
-    if (!cv || !sc || !stage) return;
+    const cv = $('rt_overlay'), stage = $('rt_stage');
+    if (!cv || !stage) return;
     cv.width = stage.clientWidth; cv.height = stage.clientHeight;
     const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
     let data; try { data = JSON.parse((box && box.value) || '{}'); } catch (e) { return; }
-    if (!data.boxes || !data.cw) return;
-    const ox = parseFloat(sc.dataset.x) || 0, oy = parseFloat(sc.dataset.y) || 0;
-    const sw = parseFloat(sc.dataset.w) || stage.clientWidth;
-    const sh = parseFloat(sc.dataset.h) || stage.clientHeight;
-    const rx = sw / data.cw, ry = sh / data.ch;
-    g.lineWidth = 2.5; g.font = '600 13px system-ui, -apple-system, sans-serif'; g.textBaseline = 'top';
-    data.boxes.forEach(b => {
-      const X = ox + b.x * rx, Y = oy + b.y * ry, W = b.w * rx, H = b.h * ry;
-      g.strokeStyle = '#ef4444'; g.strokeRect(X, Y, W, H);
-      const t = b.label + ' ' + Math.round(b.conf * 100) + '% · ' + b.w + '×' + b.h;
-      const tw = g.measureText(t).width + 10, ty = Y - 19 >= 0 ? Y - 19 : Y + 2;
-      g.fillStyle = 'rgba(0,0,0,.74)'; g.fillRect(X, ty, tw, 18);
-      g.fillStyle = '#fff'; g.fillText(t, X + 5, ty + 3);
-    });
-    const sum = $('rt_live_summary');
-    if (sum) {
-      const uniq = {};
-      data.boxes.forEach(b => { uniq[b.label] = Math.max(uniq[b.label] || 0, b.conf); });
-      const parts = Object.entries(uniq).sort((a, b) => b[1] - a[1])
-                    .map(([k, v]) => k + ' ' + Math.round(v * 100) + '%');
-      sum.textContent = data.boxes.length
-        ? 'พบ ' + data.boxes.length + ' จุด · ' + parts.join(' · ')
-        : 'ยังไม่พบตำหนิในกรอบ';
+    const rs = rectVsStage();
+    const found = {};
+    if (data.boxes && data.cw && rs) {
+      const rx = rs.w / data.cw, ry = rs.h / data.ch;
+      g.lineWidth = 2.5; g.font = '600 13px system-ui, -apple-system, sans-serif'; g.textBaseline = 'top';
+      data.boxes.forEach(b => {
+        found[b.label] = Math.max(found[b.label] || 0, b.conf);
+        const X = rs.x + b.x * rx, Y = rs.y + b.y * ry, W = b.w * rx, H = b.h * ry;
+        g.strokeStyle = '#ef4444'; g.strokeRect(X, Y, W, H);
+        const t = b.label + ' ' + Math.round(b.conf * 100) + '% · ' + b.w + '×' + b.h;
+        const tw = g.measureText(t).width + 10, ty = Y - 19 >= 0 ? Y - 19 : Y + 2;
+        g.fillStyle = 'rgba(0,0,0,.74)'; g.fillRect(X, ty, tw, 18);
+        g.fillStyle = '#fff'; g.fillText(t, X + 5, ty + 3);
+      });
+    }
+    const ro = $('rt_readout');
+    if (ro) {
+      const n = (data.boxes || []).length;
+      let top = null, mx = 0;
+      ALL.forEach(k => { const val = found[k] || 0; if (val > mx) { mx = val; top = k; } });
+      ro.innerHTML =
+        '<div class="rt-ro-head">' + (n ? ('พบตำหนิ ' + n + ' จุด') : 'ยังไม่พบตำหนิในกรอบ') + '</div>' +
+        ALL.map(k => {
+          const val = found[k] || 0, on = (k === top && val > 0);
+          return '<div class="rt-ro-row' + (on ? ' on' : '') + '"><span>' + k + '</span><span>' +
+                 (val ? Math.round(val * 100) + '%' : '—') + '</span></div>';
+        }).join('');
     }
   };
 
   try { if (!window.isSecureContext) { const w = $('rt_warn'); if (w) w.style.display = 'block'; } } catch (e) {}
 }
-"""
+""").replace("__ALL_TH__", json.dumps(_ALL_TH, ensure_ascii=False))
 # ปุ่มสลับโทนสว่าง/มืด
 _JS_TOGGLE = """
 () => {
@@ -829,19 +790,26 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .rt-stage{position:relative;margin-top:10px;border-radius:12px;overflow:hidden;
     background:#000;border:1px solid var(--border);user-select:none;touch-action:none}
 #rt_video_holder video{width:100%;display:block;max-height:66vh;object-fit:contain;background:#000}
-/* เต็มจอ — ให้รู้สึกเหมือนลากกรอบบนเดสก์ท็อปจริง */
+/* เต็มจอ — ให้รู้สึกเหมือนส่องกล้องบนเดสก์ท็อปจริง (แนว app มือถือ) */
 .rt-stage.full{position:fixed;inset:0;z-index:2147483000;margin:0;border:0;border-radius:0}
 .rt-stage.full #rt_video_holder video{width:100vw;height:100vh;max-height:none;object-fit:contain}
 .rt-overlay{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
-.rt-scope{position:absolute;left:22%;top:22%;width:56%;height:56%;box-sizing:border-box;z-index:2;
-    border:2px solid #22d3ee;box-shadow:0 0 0 9999px rgba(0,0,0,.45);cursor:move}
-.rt-scope-handle{position:absolute;right:-11px;bottom:-11px;width:22px;height:22px;
-    background:#22d3ee;border:2px solid #fff;border-radius:5px;cursor:se-resize;touch-action:none}
-.rt-bar{position:absolute;left:0;right:0;top:0;z-index:4;display:flex;align-items:center;gap:12px;
-    padding:8px 12px;background:linear-gradient(rgba(0,0,0,.7),rgba(0,0,0,0));color:#fff;font-size:12.5px}
-.rt-livesum{flex:1;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* กรอบเล็ง = สี่เหลี่ยมกลางจอตายตัว (ไม่ต้องลาก) นอกกรอบมืดลง */
+.rt-scope{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:60%;height:60%;box-sizing:border-box;z-index:2;pointer-events:none;
+    border:2px solid #22d3ee;box-shadow:0 0 0 9999px rgba(0,0,0,.42)}
+.rt-stage.full .rt-scope{width:62vmin;height:62vmin}
+.rt-readout{position:absolute;left:12px;top:46px;z-index:4;min-width:210px;max-width:72vw;
+    background:rgba(0,0,0,.62);border-radius:10px;padding:10px 12px;pointer-events:none;
+    font-family:ui-monospace,Menlo,Consolas,monospace;color:#fff}
+.rt-ro-head{font-size:13px;font-weight:800;margin-bottom:6px}
+.rt-ro-row{display:flex;justify-content:space-between;gap:18px;font-size:12.5px;padding:1px 0;color:#c3ccd8}
+.rt-ro-row.on{color:#22d3ee;font-weight:800}
+.rt-bar{position:absolute;left:0;right:0;top:0;z-index:5;display:flex;align-items:center;gap:12px;
+    padding:8px 12px;background:linear-gradient(rgba(0,0,0,.72),rgba(0,0,0,0));color:#fff;font-size:12.5px}
+.rt-bar #rt_hint{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rt-close{margin-left:auto;background:#ef4444;color:#fff;border:0;border-radius:8px;
-    padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer}
+    padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer}
 /* แผงผลสด — สไตล์เดียวกับ overlay ในแอปมือถือ (ลิสต์ทุกชนิด + แถบ %) */
 .rt-panel{border:1px solid var(--border);border-left:5px solid var(--border);
     border-radius:12px;background:var(--card);padding:12px 14px;margin-top:8px}
@@ -934,9 +902,9 @@ def build_ui():
 
             with gr.Tab("เรียลไทม์ (ส่องหน้าจอ)"):
                 gr.HTML(
-                    "<div class='hint'>กด <b>ส่องหน้าจอ</b> → เลือกหน้าต่าง/แท็บที่จะแชร์ → "
-                    "<b>ลากกรอบสีฟ้า</b>ไปครอบบริเวณที่อยากตรวจ (ลากที่มุมล่างขวาเพื่อย่อ/ขยาย) — "
-                    "ระบบตรวจเฉพาะในกรอบ วาดผล + นับตำหนิทุก ~0.4 วินาที (Stage 2 ข้าม Stage 1)</div>"
+                    "<div class='hint'>กด <b>ส่องหน้าจอ</b> → เลือกหน้าต่าง/แท็บที่จะแชร์ → หน้าจอจะขึ้น<b>เต็มจอ</b> "
+                    "พร้อม<b>กรอบเล็งสีฟ้ากลางจอ</b> · เลื่อนสิ่งที่จะตรวจให้อยู่ในกรอบ — "
+                    "ระบบตรวจเฉพาะในกรอบทุก ~0.9 วินาที วาดกรอบแดง + ไล่ผล 8 ชนิดที่มุมซ้ายบน (ข้าม Stage 1)</div>"
                     "<div id='rt_warn' class='rt-warn' style='display:none'>"
                     "⚠️ <b>ส่องหน้าจอไม่ได้</b> — เบราว์เซอร์ยอมให้ทำเฉพาะหน้าที่เป็น <b>https</b> หรือ <b>localhost</b><br>"
                     "• รัน <code>python app.py --share</code> แล้วเปิดลิงก์ <code>https://…gradio.live</code><br>"
@@ -953,21 +921,21 @@ def build_ui():
                     "<div id='rt_stage' class='rt-stage' style='display:none'>"
                     "<div id='rt_video_holder'></div>"
                     "<canvas id='rt_overlay' class='rt-overlay'></canvas>"
-                    "<div id='rt_scope' class='rt-scope'><div class='rt-scope-handle'></div></div>"
+                    "<div id='rt_scope' class='rt-scope'></div>"
+                    "<div id='rt_readout' class='rt-readout'></div>"
                     "<div class='rt-bar'>"
-                    "<span id='rt_hint'>ลากกรอบไปครอบจุดที่จะตรวจ · มุมล่างขวา = ย่อ/ขยาย</span>"
-                    "<span id='rt_live_summary' class='rt-livesum'></span>"
+                    "<span id='rt_hint'>เล็งให้ตำหนิอยู่ในกรอบสีฟ้ากลางจอ</span>"
                     "<button id='rt_close' class='rt-close'>✕ ปิด</button>"
                     "</div>"
                     "</div>")
                 rt_txt = gr.HTML(_rt_card(0, {}))
                 gr.HTML(
                     "<div class='rt-desc'>"
-                    "<b>โหมดนี้ทำอะไร</b> — ครอปเฉพาะพื้นที่ใน<b>กรอบสีฟ้า</b>ของหน้าจอที่แชร์ ทุก ~0.4 วินาที "
+                    "<b>โหมดนี้ทำอะไร</b> — ส่องหน้าจอเต็มจอ + กรอบเล็งกลางจอ · ครอปเฉพาะในกรอบทุก ~0.9 วินาที "
                     "แล้วให้ Stage 2 (YOLO11n) ตรวจตำหนิ โดย<b>ข้าม Stage 1</b> (ไม่หาพื้นที่เหล็กก่อน) เพื่อให้เร็วพอดูสด<br>"
-                    "<b>อ่านผลยังไง</b> — กรอบแดง + ป้าย “ชื่อ NN% · กว้าง×สูง(px)” วาดทับภาพสดในกรอบสีฟ้า · "
-                    "แผงด้านล่างไล่ทั้ง 8 ชนิด ตัวเลข % = ความมั่นใจสูงสุดของชนิดนั้นในเฟรมปัจจุบัน · "
-                    "ชนิดที่มั่นใจสุด = ตัวหนา/แถบแดง · “—” = ไม่พบในเฟรมนี้<br>"
+                    "<b>อ่านผลยังไง</b> — กรอบแดง + ป้าย “ชื่อ NN% · กว้าง×สูง(px)” บนภาพสด · "
+                    "แผงมุมซ้ายบนไล่ทั้ง 8 ชนิด ตัวเลข % = ความมั่นใจสูงสุดของชนิดนั้นในเฟรมปัจจุบัน · "
+                    "ชนิดที่มั่นใจสุด = ตัวฟ้า/ตัวหนา · “—” = ไม่พบในเฟรมนี้<br>"
                     "<b>ข้อจำกัด</b> — โมเดลชุดนี้แม่นเรื่อง<b>สนิม</b>ที่สุด อีก 7 ชนิดบนภาพถ่ายจริงยังพลาดได้บ่อย · "
                     "เฟรมเบลอ/สั่น/แสงน้อย/ย่อเล็กมาก ทำให้เตือนผิดหรือพลาดได้ · "
                     "ผลเรียลไทม์เป็นแค่การส่องดูคร่าว ๆ — ให้ยึดผลจากแท็บ “อัปโหลดภาพ” (มี Stage 1 + การจัดระดับความเสี่ยง) เป็นหลัก<br>"
