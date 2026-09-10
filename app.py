@@ -450,51 +450,110 @@ def submit_feedback(orig_rgb, annotated_rgb, state, rating, comment):
     return "ขอบคุณสำหรับ feedback — บันทึกแล้ว"
 
 
+# โหลดตอนเปิดหน้า — เลือกโทนตามที่เคยตั้ง หรือตามระบบ
+_JS_ONLOAD = """
+() => {
+  try {
+    const s = localStorage.getItem('steeldemo_theme');
+    const dark = s ? s === 'dark'
+                   : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.body.classList.toggle('dark', dark);
+    document.querySelectorAll('gradio-app, .gradio-container')
+            .forEach(e => e.classList.toggle('dark', dark));
+  } catch (e) {}
+}
+"""
+# ปุ่มสลับโทนสว่าง/มืด
+_JS_TOGGLE = """
+() => {
+  const on = !document.body.classList.contains('dark');
+  document.body.classList.toggle('dark', on);
+  document.querySelectorAll('gradio-app, .gradio-container')
+          .forEach(e => e.classList.toggle('dark', on));
+  try { localStorage.setItem('steeldemo_theme', on ? 'dark' : 'light'); } catch (e) {}
+}
+"""
+
 _CSS = """
-:root{color-scheme:light}
+:root{
+  color-scheme:light;
+  --bg:#ffffff; --surface:#fbfcfd; --card:#ffffff;
+  --border:#e3e8ee; --border-soft:#eef2f6;
+  --fg:#0f172a; --fg-2:#334155; --fg-3:#475569; --fg-faint:#94a3b8;
+  --shadow:0 1px 3px rgba(15,23,42,.06);
+  --tab-fg:#64748b; --tab-fg-on:#0f172a; --tab-bg-on:#eef4ff; --tab-bar:#2563eb;
+  --limits-bg:#fff8ef; --limits-bd:#fde3c0; --limits-fg:#7a5320; --limits-fg-b:#7a3f0e;
+}
+body.dark{
+  color-scheme:dark;
+  --bg:#0e1420; --surface:#161d2b; --card:#1a2232;
+  --border:#2b3648; --border-soft:#232d3d;
+  --fg:#f1f5f9; --fg-2:#cbd5e1; --fg-3:#aab6c6; --fg-faint:#8090a4;
+  --shadow:0 1px 3px rgba(0,0,0,.4);
+  --tab-fg:#93a2b8; --tab-fg-on:#f1f5f9; --tab-bg-on:#1f2b3d; --tab-bar:#60a5fa;
+  --limits-bg:#2a2213; --limits-bd:#4a3a1e; --limits-fg:#e7c58c; --limits-fg-b:#f1d5a4;
+}
 footer{display:none!important}
-body,.gradio-container{background:#ffffff!important}
+body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .gradio-container{max-width:1100px!important;margin:0 auto!important;padding:12px 14px 32px!important}
-/* ภาพผลตรวจ — ปรับตามอัตราส่วนภาพเอง จำกัดความสูงไม่ให้ล้นจอ */
-.result-img{border:1px solid #e3e8ee;border-radius:12px;background:#fbfcfd;min-height:220px}
+
+/* ===== แท็บหัวข้อ — ให้เด่นชัด ===== */
+.tabs>.tab-nav, .tab-nav{
+  border-bottom:2px solid var(--border)!important; gap:6px!important; margin-bottom:16px!important}
+.tab-nav button{
+  font-size:16.5px!important; font-weight:700!important; color:var(--tab-fg)!important;
+  padding:11px 22px!important; border:none!important; background:transparent!important;
+  border-radius:9px 9px 0 0!important; opacity:1!important}
+.tab-nav button:hover{color:var(--tab-fg-on)!important; background:var(--surface)!important}
+.tab-nav button.selected{
+  color:var(--tab-fg-on)!important; background:var(--tab-bg-on)!important;
+  box-shadow:inset 0 -3px 0 var(--tab-bar)!important}
+
+/* ===== ปุ่มสลับโทน (มุมขวาบน) ===== */
+.topbar{align-items:flex-start!important; gap:8px!important}
+.themebtn{flex:none!important; min-width:0!important}
+.themebtn button{font-size:13px!important; padding:7px 12px!important}
+
+/* ภาพผลตรวจ */
+.result-img{border:1px solid var(--border);border-radius:12px;background:var(--surface);min-height:220px}
 .result-img img{object-fit:contain!important;max-height:72vh!important}
 /* หัวเรื่อง */
 .hd{padding:6px 2px 12px}
-.hd-title{font-size:24px;font-weight:800;color:#0f172a;letter-spacing:.2px;line-height:1.25}
-.hd-sub{font-size:14.5px;color:#475569;margin-top:6px;line-height:1.55}
-.hd-note{font-size:12.5px;color:#94a3b8;margin-top:5px}
-.hint{font-size:13px;color:#64748b;margin:-2px 0 10px;line-height:1.55}
+.hd-title{font-size:24px;font-weight:800;color:var(--fg);letter-spacing:.2px;line-height:1.25}
+.hd-sub{font-size:14.5px;color:var(--fg-3);margin-top:6px;line-height:1.55}
+.hd-note{font-size:12.5px;color:var(--fg-faint);margin-top:5px}
+.hint{font-size:13px;color:var(--fg-3);margin:-2px 0 10px;line-height:1.55}
 /* การ์ดสรุปผล */
-.rc{border:1px solid #e3e8ee;border-left:6px solid #cbd5e1;border-radius:12px;
-    padding:16px 18px;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.06)}
-.rc-kicker{font-size:11px;letter-spacing:.12em;color:#94a3b8;text-transform:uppercase;font-weight:700}
-.rc-title{font-size:19px;font-weight:800;color:#0f172a;line-height:1.35;margin-top:4px}
-.rc-sub{font-size:14.5px;color:#334155;margin-top:8px;line-height:1.6}
+.rc{border:1px solid var(--border);border-left:6px solid var(--border);border-radius:12px;
+    padding:16px 18px;background:var(--card);box-shadow:var(--shadow)}
+.rc-kicker{font-size:11px;letter-spacing:.12em;color:var(--fg-faint);text-transform:uppercase;font-weight:700}
+.rc-title{font-size:19px;font-weight:800;color:var(--fg);line-height:1.35;margin-top:4px}
+.rc-sub{font-size:14.5px;color:var(--fg-2);margin-top:8px;line-height:1.6}
 /* legend ใต้ภาพผล */
 .legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:10px 2px 2px}
-.lg{font-size:13px;color:#475569;display:flex;align-items:center}
+.lg{font-size:13px;color:var(--fg-3);display:flex;align-items:center}
 .lg::before{content:"";width:13px;height:13px;border-radius:3px;margin-right:7px;flex:none}
 .lg-def::before{background:#ef4444}
 .lg-may::before{background:#f59e0b}
-.foot{font-size:12.5px;color:#94a3b8;line-height:1.65;padding:16px 2px 2px;
-    border-top:1px solid #eef2f6;margin-top:20px}
+.foot{font-size:12.5px;color:var(--fg-faint);line-height:1.65;padding:16px 2px 2px;
+    border-top:1px solid var(--border-soft);margin-top:20px}
 /* กล่องขอบเขต/ข้อจำกัด */
-.limits{border:1px solid #fde3c0;background:#fff8ef;border-radius:10px;
-    padding:12px 16px;margin:2px 2px 14px;font-size:13.5px;color:#7a5320;line-height:1.6}
-.limits b{color:#7a3f0e}
+.limits{border:1px solid var(--limits-bd);background:var(--limits-bg);border-radius:10px;
+    padding:12px 16px;margin:2px 2px 14px;font-size:13.5px;color:var(--limits-fg);line-height:1.6}
+.limits b{color:var(--limits-fg-b)}
 /* กล่องสาเหตุ/คำแนะนำต่อชนิดตำหนิ */
-.causes{border:1px solid #e3e8ee;background:#fbfcfe;border-radius:12px;
-    padding:14px 18px;margin:12px 2px 2px;font-size:14px;color:#334155;line-height:1.65}
-.causes-h{font-size:14.5px;font-weight:800;color:#0f172a;margin-bottom:11px}
-.causes-h span{display:block;font-size:12px;font-weight:400;color:#94a3b8;margin-top:2px}
-.causes-item{padding:11px 0;border-top:1px solid #e8edf2}
+.causes{border:1px solid var(--border);background:var(--surface);border-radius:12px;
+    padding:14px 18px;margin:12px 2px 2px;font-size:14px;color:var(--fg-2);line-height:1.65}
+.causes-h{font-size:14.5px;font-weight:800;color:var(--fg);margin-bottom:11px}
+.causes-h span{display:block;font-size:12px;font-weight:400;color:var(--fg-faint);margin-top:2px}
+.causes-item{padding:11px 0;border-top:1px solid var(--border)}
 .causes-item:first-of-type{border-top:0;padding-top:2px}
-.causes-item b{color:#0f172a;font-size:15px}
-.causes-risk{font-size:12.5px;color:#64748b;margin-left:8px}
-.causes-adv{color:#475569;margin-top:3px}
+.causes-item b{color:var(--fg);font-size:15px}
+.causes-risk{font-size:12.5px;color:var(--fg-3);margin-left:8px}
+.causes-adv{color:var(--fg-3);margin-top:3px}
 /* feedback */
-.fb{border:1px solid #e3e8ee;border-radius:12px;padding:14px 18px;margin-top:12px;background:#fcfdfe}
-.fb-h{font-size:14.5px;font-weight:800;color:#1e293b;margin-bottom:4px}
+.fb{border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-top:12px;background:var(--card)}
+.fb-h{font-size:14.5px;font-weight:800;color:var(--fg);margin-bottom:4px}
 /* ตารางผล (gr.Dataframe) — เลื่อนแนวนอนได้เมื่อจอแคบ */
 .res-table .table-wrap, .res-table table{font-size:14px!important}
 .res-table{overflow-x:auto}
@@ -503,6 +562,7 @@ body,.gradio-container{background:#ffffff!important}
   .gradio-container{padding:8px 10px 24px!important}
   .hd-title{font-size:20px}
   .hd-sub{font-size:13px}
+  .tab-nav button{font-size:15px!important;padding:9px 15px!important}
   .result-img img{max-height:56vh!important}
   .rc{padding:13px 15px}
   .rc-title{font-size:17px}
@@ -519,16 +579,20 @@ def build_ui():
     real_samples = _globs(BASE_DIR / "real_test" / "images")       # ภาพถ่ายจริงระดับ scene
     model_choices = list(_available_models())
 
-    with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก") as demo:
-        gr.HTML(
-            "<div class='hd'>"
-            "<div class='hd-title'>ตรวจจับตำหนิพื้นผิวเหล็ก</div>"
-            "<div class='hd-sub'>อัปโหลดหรือถ่ายภาพผิวเหล็ก ระบบจะคัดกรองตำหนิ 8 ชนิดให้ "
-            "(รอยแตกลายงา, สิ่งแปลกปลอม, ผิวลอก, ผิวเป็นหลุม, สะเก็ดรีด, รอยขีดข่วน, สนิม, รอยแตกร้าว)</div>"
-            "<div class='hd-note'>prototype เพื่อการศึกษา · ตรวจ “สนิม” ได้ดีที่สุด ชนิดอื่นบนภาพถ่ายจริงยังพลาดได้บ่อย · "
-            "ผลเป็นเพียงตัวช่วยคัดกรอง ห้ามใช้ตัดสินคุณภาพชิ้นงานจริง</div>"
-            "</div>"
-        )
+    with gr.Blocks(title="ตรวจตำหนิพื้นผิวเหล็ก", js=_JS_ONLOAD) as demo:
+        with gr.Row(elem_classes=["topbar"]):
+            gr.HTML(
+                "<div class='hd'>"
+                "<div class='hd-title'>ตรวจจับตำหนิพื้นผิวเหล็ก</div>"
+                "<div class='hd-sub'>อัปโหลดหรือถ่ายภาพผิวเหล็ก ระบบจะคัดกรองตำหนิ 8 ชนิดให้ "
+                "(รอยแตกลายงา, สิ่งแปลกปลอม, ผิวลอก, ผิวเป็นหลุม, สะเก็ดรีด, รอยขีดข่วน, สนิม, รอยแตกร้าว)</div>"
+                "<div class='hd-note'>prototype เพื่อการศึกษา · ตรวจ “สนิม” ได้ดีที่สุด ชนิดอื่นบนภาพถ่ายจริงยังพลาดได้บ่อย · "
+                "ผลเป็นเพียงตัวช่วยคัดกรอง ห้ามใช้ตัดสินคุณภาพชิ้นงานจริง</div>"
+                "</div>"
+            )
+            theme_btn = gr.Button("🌗 สลับโทนสว่าง/มืด", size="sm", scale=0,
+                                  elem_classes=["themebtn"])
+        theme_btn.click(fn=None, inputs=None, outputs=None, js=_JS_TOGGLE)
 
         cur_in = gr.State(None)     # ภาพล่าสุดที่ตรวจ (ไว้ให้ feedback)
         # พารามิเตอร์ทั้งหมดตั้งค่าที่ "ดีที่สุด" ไว้แล้ว — ผู้ใช้ไม่ต้องเลือกเอง
