@@ -289,18 +289,35 @@ def analyze_stream(frame_rgb):
 
 
 def analyze_screen(data_url):
-    """โหมดเรียลไทม์ (ส่องหน้าจอ): รับเฟรม data:URL จาก getDisplayMedia แล้วส่งเข้า analyze_stream"""
+    """โหมดเรียลไทม์ (ส่องหน้าจอ): รับเฟรม crop (data:URL) จาก getDisplayMedia
+    คืน (JSON กล่องที่เจอ [พิกัดในเฟรม crop], การ์ดสรุป 8 ชนิด) — JS เอาไปวาดทับวิดีโอสด"""
+    empty = json.dumps({"cw": 0, "ch": 0, "boxes": []})
     if not data_url or "," not in data_url:
-        return gr.update(), gr.update()
+        return empty, _rt_card(0, {})
     try:
         import base64
         raw = base64.b64decode(data_url.split(",", 1)[1])
         bgr = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
         if bgr is None:
-            return gr.update(), gr.update()
-        return analyze_stream(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+            return empty, _rt_card(0, {})
+        mk = next(iter(_available_models()), None)
+        _, s2, device = _ensure_models(mk)
+        cc = _STATE["class_conf"] or {}
+        dets = P.run_stage2(s2, bgr, _RAW_FLOOR, device, augment=False, class_conf=None)
+        boxes, found = [], {}
+        for d in dets:
+            if d["confidence"] < max(_RAW_FLOOR, cc.get(d["class"], 0.4)):
+                continue
+            x1, y1, x2, y2 = (int(v) for v in d["bbox_xyxy_crop"])
+            th = P.DEFECT_INFO[d["class"]]["name_th"]
+            boxes.append({"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
+                          "label": th, "conf": round(float(d["confidence"]), 2)})
+            found[th] = max(found.get(th, 0.0), d["confidence"])
+        ch, cw = bgr.shape[:2]
+        return (json.dumps({"cw": cw, "ch": ch, "boxes": boxes}),
+                _rt_card(len(boxes), found))
     except Exception as e:
-        return gr.update(), _rt_card(-1, {}, err=str(e))
+        return empty, _rt_card(-1, {}, err=str(e))
 
 
 def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multiscale, progress):
@@ -634,6 +651,32 @@ _JS_ONLOAD = r"""
     S.stream = null; S.video = null; S.canvas = null; S.busy = false;
     const stage = $('rt_stage'); if (stage) stage.style.display = 'none';
     const holder = $('rt_video_holder'); if (holder) holder.innerHTML = '';
+    const cv = $('rt_overlay'); if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+  };
+
+  // เรียกหลัง Python คืนผล — วาดกล่องที่เจอทับวิดีโอสด + ปลดล็อกเฟรมถัดไป
+  window.__ssDraw = () => {
+    if (S) S.busy = false;
+    const box = document.querySelector('#ss_result textarea');
+    const cv = $('rt_overlay'), sc = $('rt_scope'), stage = $('rt_stage');
+    if (!cv || !sc || !stage) return;
+    cv.width = stage.clientWidth; cv.height = stage.clientHeight;
+    const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
+    let data; try { data = JSON.parse((box && box.value) || '{}'); } catch (e) { return; }
+    if (!data.boxes || !data.cw) return;
+    const ox = parseFloat(sc.dataset.x) || 0, oy = parseFloat(sc.dataset.y) || 0;
+    const sw = parseFloat(sc.dataset.w) || stage.clientWidth;
+    const sh = parseFloat(sc.dataset.h) || stage.clientHeight;
+    const rx = sw / data.cw, ry = sh / data.ch;
+    g.lineWidth = 2.5; g.font = '600 13px system-ui, -apple-system, sans-serif'; g.textBaseline = 'top';
+    data.boxes.forEach(b => {
+      const X = ox + b.x * rx, Y = oy + b.y * ry, W = b.w * rx, H = b.h * ry;
+      g.strokeStyle = '#ef4444'; g.strokeRect(X, Y, W, H);
+      const t = b.label + ' ' + Math.round(b.conf * 100) + '% · ' + b.w + '×' + b.h;
+      const tw = g.measureText(t).width + 10, ty = Y - 19 >= 0 ? Y - 19 : Y + 2;
+      g.fillStyle = 'rgba(0,0,0,.74)'; g.fillRect(X, ty, tw, 18);
+      g.fillStyle = '#fff'; g.fillText(t, X + 5, ty + 3);
+    });
   };
 
   try { if (!window.isSecureContext) { const w = $('rt_warn'); if (w) w.style.display = 'block'; } } catch (e) {}
@@ -650,7 +693,7 @@ _JS_TOGGLE = """
 }
 """
 # หลัง Python ประมวลผลเฟรมส่องหน้าจอเสร็จ -> ปลดล็อกให้ส่งเฟรมถัดไป (backpressure)
-_JS_SS_DONE = "() => { if (window.__ss) window.__ss.busy = false; }"
+_JS_SS_DRAW = "() => window.__ssDraw && window.__ssDraw()"
 
 _CSS = """
 :root{
@@ -730,7 +773,7 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .causes-risk{font-size:12.5px;color:var(--fg-3);margin-left:8px}
 .causes-adv{color:var(--fg-3);margin-top:3px}
 /* เรียลไทม์ */
-#ss_frame{display:none!important}
+#ss_frame, #ss_result{display:none!important}
 .rt-warn{border:1px solid #fcd9b0;background:#fff7ec;color:#8a4b12;border-radius:10px;
     padding:11px 15px;margin:6px 2px 10px;font-size:13px;line-height:1.7}
 .rt-warn code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:4px;font-size:12px}
@@ -738,12 +781,13 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 /* พื้นที่แชร์หน้าจอ + กรอบเลือกพื้นที่ (ลาก/ย่อขยายได้) */
 .rt-stage{position:relative;margin-top:10px;border-radius:12px;overflow:hidden;
     background:#000;border:1px solid var(--border);user-select:none;touch-action:none}
-#rt_video_holder video{width:100%;display:block;max-height:60vh;object-fit:contain;background:#000}
-.rt-scope{position:absolute;left:22%;top:22%;width:56%;height:56%;box-sizing:border-box;
+#rt_video_holder video{width:100%;display:block;max-height:66vh;object-fit:contain;background:#000}
+.rt-overlay{position:absolute;left:0;top:0;pointer-events:none;z-index:1}
+.rt-scope{position:absolute;left:22%;top:22%;width:56%;height:56%;box-sizing:border-box;z-index:2;
     border:2px solid #22d3ee;box-shadow:0 0 0 9999px rgba(0,0,0,.45);cursor:move}
 .rt-scope-handle{position:absolute;right:-9px;bottom:-9px;width:18px;height:18px;
     background:#22d3ee;border:2px solid #fff;border-radius:4px;cursor:se-resize}
-.rt-stage-hint{position:absolute;left:8px;top:8px;font-size:11.5px;color:#fff;
+.rt-stage-hint{position:absolute;left:8px;top:8px;z-index:3;font-size:11.5px;color:#fff;
     background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px}
 /* แผงผลสด — สไตล์เดียวกับ overlay ในแอปมือถือ (ลิสต์ทุกชนิด + แถบ %) */
 .rt-panel{border:1px solid var(--border);border-left:5px solid var(--border);
@@ -849,21 +893,21 @@ def build_ui():
                 with gr.Row():
                     ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="lg")
                     ss_stop = gr.Button("■ หยุด", size="lg")
-                ss_frame = gr.Textbox(elem_id="ss_frame")   # ซ่อนด้วย CSS — รับ data:URL จาก JS
+                ss_frame = gr.Textbox(elem_id="ss_frame")     # ซ่อน — รับ data:URL (crop) จาก JS
+                ss_result = gr.Textbox(elem_id="ss_result")   # ซ่อน — JSON กล่องที่เจอ ให้ JS วาดทับวิดีโอ
                 gr.HTML(
                     "<div id='rt_stage' class='rt-stage' style='display:none'>"
                     "<div id='rt_video_holder'></div>"
+                    "<canvas id='rt_overlay' class='rt-overlay'></canvas>"
                     "<div class='rt-stage-hint'>ลากกรอบ · มุมล่างขวา = ย่อ/ขยาย</div>"
                     "<div id='rt_scope' class='rt-scope'><div class='rt-scope-handle'></div></div>"
                     "</div>")
-                rt_out = gr.Image(type="numpy", label="ผลตรวจในกรอบ (อัปเดตทุก ~0.4 วิ)",
-                                  interactive=False, elem_classes=["result-img"])
                 rt_txt = gr.HTML(_rt_card(0, {}))
                 gr.HTML(
                     "<div class='rt-desc'>"
                     "<b>โหมดนี้ทำอะไร</b> — ครอปเฉพาะพื้นที่ใน<b>กรอบสีฟ้า</b>ของหน้าจอที่แชร์ ทุก ~0.4 วินาที "
                     "แล้วให้ Stage 2 (YOLO11n) ตรวจตำหนิ โดย<b>ข้าม Stage 1</b> (ไม่หาพื้นที่เหล็กก่อน) เพื่อให้เร็วพอดูสด<br>"
-                    "<b>อ่านผลยังไง</b> — ภาพ “ผลตรวจในกรอบ” = สิ่งที่อยู่ในกรอบสีฟ้า + กรอบตำหนิที่เจอ · "
+                    "<b>อ่านผลยังไง</b> — กรอบแดง + ป้าย “ชื่อ NN% · กว้าง×สูง(px)” วาดทับภาพสดในกรอบสีฟ้า · "
                     "แผงด้านล่างไล่ทั้ง 8 ชนิด ตัวเลข % = ความมั่นใจสูงสุดของชนิดนั้นในเฟรมปัจจุบัน · "
                     "ชนิดที่มั่นใจสุด = ตัวหนา/แถบแดง · “—” = ไม่พบในเฟรมนี้<br>"
                     "<b>ข้อจำกัด</b> — โมเดลชุดนี้แม่นเรื่อง<b>สนิม</b>ที่สุด อีก 7 ชนิดบนภาพถ่ายจริงยังพลาดได้บ่อย · "
@@ -930,8 +974,8 @@ def build_ui():
         # โหมดเรียลไทม์ — ส่องหน้าจอ (config คงที่เดียวกับหน้าอัปโหลด)
         ss_start.click(fn=None, js="() => window.__startScreen()")
         ss_stop.click(fn=None, js="() => window.__stopScreen()")
-        ss_frame.change(analyze_screen, inputs=[ss_frame], outputs=[rt_out, rt_txt],
-                        show_progress="hidden", concurrency_limit=1).then(fn=None, js=_JS_SS_DONE)
+        ss_frame.change(analyze_screen, inputs=[ss_frame], outputs=[ss_result, rt_txt],
+                        show_progress="hidden", concurrency_limit=1).then(fn=None, js=_JS_SS_DRAW)
     return demo
 
 
