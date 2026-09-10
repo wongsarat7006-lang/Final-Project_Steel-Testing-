@@ -603,6 +603,18 @@ _JS_ONLOAD = r"""
   }
   initScopeDrag();
 
+  // ผูกปุ่มแบบ delegation ที่ document — ทำงานแม้ปุ่มถูกเรนเดอร์ทีหลัง (แท็บยังไม่เคยเปิด)
+  if (!window.__ssClickBound) {
+    window.__ssClickBound = true;
+    document.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest('#ss_start')) {
+        e.preventDefault(); console.log('[steeldemo] ส่องหน้าจอ: คลิก'); window.__startScreen();
+      } else if (e.target.closest && e.target.closest('#ss_stop')) {
+        e.preventDefault(); window.__stopScreen();
+      }
+    }, true);
+  }
+
   window.__ssPush = () => {
     if (!S.video || S.busy) return;
     const stage = $('rt_stage'), sc = $('rt_scope'), box = document.querySelector('#ss_frame textarea');
@@ -625,9 +637,19 @@ _JS_ONLOAD = r"""
   };
 
   window.__startScreen = async () => {
-    const warn = $('rt_warn');
-    const fail = () => { if (warn) { warn.style.display = 'block'; warn.classList.add('rt-warn-hot'); } };
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { fail(); return; }
+    const warn = $('rt_warn'), stage = $('rt_stage'), hint = $('rt_hint');
+    const fail = (msg) => {
+      if (warn) { warn.style.display = 'block'; warn.classList.add('rt-warn-hot'); }
+      if (hint) hint.textContent = msg || 'เปิดการส่องหน้าจอไม่สำเร็จ';
+    };
+    console.log('[steeldemo] __startScreen เริ่ม · secure=' + window.isSecureContext +
+                ' · api=' + !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia));
+    if (hint) hint.textContent = 'กำลังขอสิทธิ์แชร์หน้าจอ…';
+    if (stage) stage.style.display = 'block';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      fail('เบราว์เซอร์นี้ไม่รองรับการส่องหน้าจอ (ต้อง https/localhost + เบราว์เซอร์บนคอมพิวเตอร์)');
+      return;
+    }
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({video: {frameRate: 8}, audio: false});
       const v = document.createElement('video');
@@ -637,13 +659,19 @@ _JS_ONLOAD = r"""
       if (holder) { holder.innerHTML = ''; holder.appendChild(v); }
       S.stream = s; S.video = v; S.canvas = document.createElement('canvas'); S.busy = false;
       s.getVideoTracks()[0].addEventListener('ended', () => window.__stopScreen());
-      const stage = $('rt_stage'); if (stage) stage.style.display = 'block';
+      initScopeDrag();
       v.addEventListener('loadedmetadata', clampScope);
       setTimeout(clampScope, 120);
       if (S.timer) clearInterval(S.timer);
       S.timer = setInterval(window.__ssPush, 400);
+      if (hint) hint.textContent = 'ลากกรอบ · มุมล่างขวา = ย่อ/ขยาย';
       if (warn) { warn.classList.remove('rt-warn-hot'); warn.style.display = 'none'; }
-    } catch (e) { fail(); }
+    } catch (e) {
+      console.warn('[steeldemo] getDisplayMedia error', e);
+      fail((e && e.name === 'NotAllowedError')
+           ? 'คุณยกเลิก หรือเบราว์เซอร์ปฏิเสธการแชร์หน้าจอ'
+           : 'ส่องหน้าจอไม่ได้ (' + (e && e.name || 'error') + ') — ต้อง https/localhost + เบราว์เซอร์บนคอมพิวเตอร์');
+    }
   };
   window.__stopScreen = () => {
     if (S.timer) clearInterval(S.timer); S.timer = null;
@@ -891,15 +919,16 @@ def build_ui():
                     "• หรือใน Chrome: <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> "
                     "→ ใส่ <code>http://192.168.1.102:7860</code> → Enabled → รีสตาร์ตเบราว์เซอร์</div>")
                 with gr.Row():
-                    ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="lg")
-                    ss_stop = gr.Button("■ หยุด", size="lg")
+                    ss_start = gr.Button("🖥️ ส่องหน้าจอ", variant="primary", size="lg",
+                                         elem_id="ss_start")
+                    ss_stop = gr.Button("■ หยุด", size="lg", elem_id="ss_stop")
                 ss_frame = gr.Textbox(elem_id="ss_frame")     # ซ่อน — รับ data:URL (crop) จาก JS
                 ss_result = gr.Textbox(elem_id="ss_result")   # ซ่อน — JSON กล่องที่เจอ ให้ JS วาดทับวิดีโอ
                 gr.HTML(
                     "<div id='rt_stage' class='rt-stage' style='display:none'>"
                     "<div id='rt_video_holder'></div>"
                     "<canvas id='rt_overlay' class='rt-overlay'></canvas>"
-                    "<div class='rt-stage-hint'>ลากกรอบ · มุมล่างขวา = ย่อ/ขยาย</div>"
+                    "<div id='rt_hint' class='rt-stage-hint'>ลากกรอบ · มุมล่างขวา = ย่อ/ขยาย</div>"
                     "<div id='rt_scope' class='rt-scope'><div class='rt-scope-handle'></div></div>"
                     "</div>")
                 rt_txt = gr.HTML(_rt_card(0, {}))
@@ -971,11 +1000,13 @@ def build_ui():
         fb_send.click(submit_feedback,
                       inputs=[cur_in, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
 
-        # โหมดเรียลไทม์ — ส่องหน้าจอ (config คงที่เดียวกับหน้าอัปโหลด)
-        ss_start.click(fn=None, js="() => window.__startScreen()")
-        ss_stop.click(fn=None, js="() => window.__stopScreen()")
+        # โหมดเรียลไทม์ — ส่องหน้าจอ. ปุ่มผูกผ่าน click delegation ใน _JS_ONLOAD (กันแท็บ lazy-render)
+        # ทาง .click(js=) ไว้เป็นทางสำรอง
+        ss_start.click(fn=None, js="() => window.__startScreen && window.__startScreen()")
+        ss_stop.click(fn=None, js="() => window.__stopScreen && window.__stopScreen()")
         ss_frame.change(analyze_screen, inputs=[ss_frame], outputs=[ss_result, rt_txt],
                         show_progress="hidden", concurrency_limit=1).then(fn=None, js=_JS_SS_DRAW)
+        demo.load(fn=None, js=_JS_ONLOAD)   # สำรอง เผื่อ Blocks(js=) ไม่ทำงานในบางเวอร์ชัน
     return demo
 
 
