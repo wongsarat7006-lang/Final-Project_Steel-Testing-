@@ -1,0 +1,71 @@
+{
+  "device": "cuda",
+  "stage2_weights": "C:\\Users\\Lenovo\\steel-defect-detection\\runs\\detect\\train-real3\\weights\\best.pt",
+  "stage2": {
+    "split": "test",
+    "overall": {
+      "mAP50": 0.8275,
+      "mAP50-95": 0.5003,
+      "precision": 0.7861,
+      "recall": 0.7635
+    },
+    "per_class": [
+      {
+        "class": "crazing",
+        "precision": 0.9342,
+        "recall": 0.4735,
+        "mAP50": 0.7562,
+        "mAP50-95": 0.3531
+      },
+      {
+        "class": "inclusion",
+        "precision": 0.7527,
+        "recall": 0.7812,
+        "mAP50": 0.8338,
+        "mAP50-95": 0.4483
+      },
+      {
+        "class": "patches",
+        "precision": 0.735,
+        "recall": 0.8495,
+        "mAP50": 0.9162,
+        "mAP50-95": 0.5258
+      },
+      {
+        "class": "pitted_surface",
+        "precision": 0.8008,
+        "recall": 0.7214,
+        "mAP50": 0.8085,
+        "mAP50-95": 0.4846
+      },
+      {
+        "class": "rolled-in_scale",
+        "precision": 0.7562,
+        "recall": 0.7238,
+        "mAP50": 0.8051,
+        "mAP50-95": 0.4441
+      },
+      {
+        "class": "scratches",
+        "precision": 0.6406,
+        "recall": 0.9265,
+        "mAP50": 0.8866,
+        "mAP50-95": 0.4567
+      },
+      {
+        "class": "rust",
+        "precision": 0.9798,
+        "recall": 1.0,
+        "mAP50": 0.995,
+        "mAP50-95": 0.956
+      },
+      {
+        "class": "crack",
+        "precision": 0.6893,
+        "recall": 0.6319,
+        "mAP50": 0.6186,
+        "mAP50-95": 0.3343
+      }
+    ]
+  }
+}

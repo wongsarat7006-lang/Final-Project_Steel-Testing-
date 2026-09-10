@@ -1,0 +1,68 @@
+{
+  "weights": "runs\\detect\\train-real3\\weights\\best.pt",
+  "data": "C:\\Users\\Lenovo\\steel-defect-detection\\merged_dataset\\data.yaml",
+  "split": "val",
+  "compare_conf": 0.4,
+  "macro_f1_opt": 0.8316,
+  "macro_f1_at_compare": 0.7548,
+  "per_class": {
+    "crazing": {
+      "conf": 0.234,
+      "f1_opt": 0.784,
+      "f1_at_compare": 0.5337,
+      "precision_opt": 0.9515,
+      "recall_opt": 0.6667
+    },
+    "inclusion": {
+      "conf": 0.242,
+      "f1_opt": 0.7958,
+      "f1_at_compare": 0.7094,
+      "precision_opt": 0.7522,
+      "recall_opt": 0.8447
+    },
+    "patches": {
+      "conf": 0.28,
+      "f1_opt": 0.8756,
+      "f1_at_compare": 0.8529,
+      "precision_opt": 0.8804,
+      "recall_opt": 0.8709
+    },
+    "pitted_surface": {
+      "conf": 0.247,
+      "f1_opt": 0.9061,
+      "f1_at_compare": 0.8881,
+      "precision_opt": 0.9355,
+      "recall_opt": 0.8786
+    },
+    "rolled-in_scale": {
+      "conf": 0.15,
+      "f1_opt": 0.7356,
+      "f1_at_compare": 0.6463,
+      "precision_opt": 0.6844,
+      "recall_opt": 0.7951
+    },
+    "scratches": {
+      "conf": 0.303,
+      "f1_opt": 0.9262,
+      "f1_at_compare": 0.8869,
+      "precision_opt": 0.8973,
+      "recall_opt": 0.957
+    },
+    "rust": {
+      "conf": 0.12,
+      "f1_opt": 1.0,
+      "f1_at_compare": 0.9918,
+      "precision_opt": 1.0,
+      "recall_opt": 1.0,
+      "_note": "override จาก val-tuned 0.878 -> 0.12 (val split ปนภาพ round1-3 ทำให้ rust ง่ายเกิน; 0.12 ให้ 12/12 P=0.92 บน real_test)"
+    },
+    "crack": {
+      "conf": 0.298,
+      "f1_opt": 0.6294,
+      "f1_at_compare": 0.5291,
+      "precision_opt": 0.7062,
+      "recall_opt": 0.5676
+    }
+  },
+  "_about": "per-class conf สำหรับ train-real3 (RGB) ใช้ในหน้าเดโม (app.py). rust override 0.12 (val overfit ที่ 0.878) — เหมือน thresholds_demo.json"
+}

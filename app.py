@@ -36,14 +36,16 @@ except ImportError:
 BASE_DIR = Path(__file__).resolve().parent
 
 # โมเดล Stage 2 ที่เลือกได้ในหน้าเดโม — key = ป้ายในหน้าจอ, value = (weights, per-class thresholds)
-# "ปรับโดเมน" (train-real1) = train-gray-n2 config + 672 ภาพ corrosion จริง (round1) — สมดุลสุด
-#   สนิม lab-crop ยังตรวจได้ (conf ~0.42) + ยิงบนภาพถ่ายจริงได้ 8/12
-# "รุ่นทดลอง scene" (train-real2) = + 1022 ภาพสนิม scene จริง (round2) — conf บนสนิม scene สูงขึ้น
-#   แต่ REGRESS บนสนิม lab-crop (rust_example: 0.42 -> 0.04) เพราะ fine-tune แรง + เทรนไม่จบ
+# "ปรับโดเมน v3" (train-real3) = train-real1 data + 683 ภาพ corrosion จริง (round3: เสาส่งไฟ/ท่อ/แผ่นเหล็ก)
+#   real_test: rust 8/12 -> 12/12 (P 0.80 -> 0.92), micro-F1 0.51 -> 0.68 · lab mAP50 0.828 (rust 0.995)
+# "ปรับโดเมน v1" (train-real1) = train-gray-n2 config + 672 ภาพ corrosion จริง (round1) — สนิม lab-crop conf ~0.42, ภาพจริง 8/12
+# "รุ่นทดลอง scene" (train-real2) = + 1022 ภาพสนิม scene จริง (round2) — REGRESS บนสนิม lab-crop (fine-tune แรง + เทรนไม่จบ)
 # "เล่มจบ" (train-gray-n2) = grayscale, NEU benchmark — ตัวเลขในเล่ม แต่ transfer ต่ำบนภาพถ่ายจริง
 _RUNS = BASE_DIR / "runs" / "detect"
 _STAGE2_MODELS = {
-    "ปรับโดเมน — ภาพถ่ายจริง (แนะนำ)": (_RUNS / "train-real1" / "weights" / "best.pt",
+    "ปรับโดเมน v3 — ภาพถ่ายจริง (แนะนำ)": (_RUNS / "train-real3" / "weights" / "best.pt",
+                                             BASE_DIR / "thresholds_real3.json"),
+    "ปรับโดเมน v1 (round 1)":            (_RUNS / "train-real1" / "weights" / "best.pt",
                                           BASE_DIR / "thresholds_demo.json"),
     "รุ่นทดลอง — เน้นภาพ scene (round 2)": (_RUNS / "train-real2" / "weights" / "best.pt",
                                               BASE_DIR / "thresholds_real2.json"),
@@ -242,6 +244,12 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multisc
     scale = _SENS.get(sensitivity, 1.0)
     cc = _STATE["class_conf"] or {}
 
+    # โหมดความไวคุมทั้ง threshold + ความละเอียดการตรวจ (ผู้ทดสอบเลือกจุดเดียว)
+    #   ไว     -> ลด threshold + เปิด TTA (พลิก/ย่อ-ขยาย) — ช้าขึ้น ~2-3 เท่า
+    #   ไวมาก  -> + ตรวจหลายสเกล/ตัดไทล์ — ช้าขึ้น ~3-6 เท่า เจอบนภาพใหญ่/ภาพจริงมากขึ้น
+    use_tta = bool(detailed) or sensitivity in ("ไว", "ไวมาก")
+    use_ms = bool(multiscale) or sensitivity == "ไวมาก"
+
     def thr(cls):                       # threshold ที่ลดตามโหมดความไว
         return max(_RAW_FLOOR, cc.get(cls, conf) * scale)
 
@@ -264,16 +272,16 @@ def _analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multisc
         boxes = list(boxes) + [full_box]
 
     # ----- Stage 2 : ตรวจตำหนิ (คืนที่ conf ต่ำ แล้วมาแยกเองเป็น confirmed / tentative) -----
-    progress(0.55, desc=("Stage 2: ตรวจหลายสเกล..." if multiscale else "Stage 2: ตรวจตำหนิ..."))
+    progress(0.55, desc=("Stage 2: ตรวจหลายสเกล..." if use_ms else "Stage 2: ตรวจตำหนิ..."))
     region_dets = []
     for x, y, w, h in boxes:
         is_full_pass = (x, y, w, h) == full_box and add_full
         k = 1.6 if is_full_pass else 1.0        # รอบ "ทั้งภาพ" ภาพถูกย่อมาก -> ต้องมั่นใจกว่าถึงจะนับ
         crop = image_bgr[y:y + h, x:x + w]
-        if multiscale:
+        if use_ms:
             dets = P.run_stage2_multiscale(s2, crop, _RAW_FLOOR, device, class_conf=None)
         else:
-            dets = P.run_stage2(s2, crop, _RAW_FLOOR, device, augment=bool(detailed),
+            dets = P.run_stage2(s2, crop, _RAW_FLOOR, device, augment=use_tta,
                                 class_conf=None)
         keep = []
         for d in dets:
@@ -534,7 +542,8 @@ def build_ui():
                 model_choices, value=model_choices[0] if model_choices else None,
                 label="โมเดล", scale=2)
             sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
-                            label="โหมดความไว (ยิ่งไว ยิ่งเจอเยอะ แต่เตือนเกินมากขึ้น)", scale=3)
+                            label="โหมดความไว — ไว = ลดเกณฑ์+ตรวจละเอียด (ช้าขึ้น) · "
+                                  "ไวมาก = + ตรวจหลายสเกล (ช้าสุด เจอบนภาพจริงมากขึ้น)", scale=3)
 
         # ===== รับภาพ: อัปโหลด / ถ่ายภาพ =====
         with gr.Tabs():
