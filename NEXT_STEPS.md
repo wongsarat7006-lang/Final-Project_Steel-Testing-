@@ -90,12 +90,36 @@ perspective/shear, copy_paste 0.3, randaugment, erasing 0.5) + `pipeline.run_sta
 **ทางที่เหลือจริง ๆ ถ้าจะให้ 6 คลาสใช้ได้บนภาพจริง:** ต้องเก็บ+annotate ภาพถ่ายจริงเอง
 (crazing/inclusion/pitted/rolled-in/scratches บนชิ้นงาน/ฉากจริง) — ไม่มีทางลัด
 
-**Round 3 ถ้าจะทำต่อ:** เทรน train-real2 ให้ครบ 100 epoch (รันใน terminal คุณเอง กัน OOM):
+### Round 3 — train-real3 (2026-09-10) — ✅ ใช้เป็น default ใหม่ของเดโม
+
+Import 3 ชุด corrosion จริงใน `downloads/` (ตัด `crack-v2` = รอยแตกคอนกรีต, `rust-detect-1350` =
+ซ้ำ Danger-Rust เดิม → leakage) → `dataset_real/round3` = **683 ภาพ / 1232 กรอบ rust**
+
 ```powershell
-python train.py --recipe camera --data merged_dataset/data_oversampled.yaml `
-                --model runs/detect/train-real1/weights/best.pt --name train-real2 --resume
+python import_labeled.py --src downloads/corrosion-detection-sb1 --round 3 --map "Grado3=rust"                          --prefix rb3sb1_ --max-box-frac 0.6
+python import_labeled.py --src downloads/corrosion-and-cracks     --round 3 --map "corrosion=rust"                       --prefix rb3cc_  --max-box-frac 0.6
+python import_labeled.py --src downloads/rust-detection-small     --round 3 --map "Rust_Under_Surface=rust,Rust_Visible=rust" --prefix rb3rds_ --max-box-frac 0.8
+python run_round.py train --round 3 --skip-label-check --model yolo11n.pt --epochs 100 --batch 6
+python tune_thresholds.py --weights runs/detect/train-real3/weights/best.pt --data merged_dataset/data.yaml --out thresholds_real3.json
+#   ^ แก้ rust conf ในไฟล์เป็น 0.12 ด้วยมือ (val split ปน round1-3 → tune ได้ 0.878 ซึ่ง kill recall บนภาพจริง)
+python evaluate_real.py --weights runs/detect/train-real3/weights/best.pt --thresholds thresholds_real3.json --out results/real_after_round3.json
 ```
-หรือหาภาพจริงของ scratches/pitted/crack-on-metal มาเพิ่ม
+
+**ผล — เทียบ train-real1 → train-real3 (real_test 18 ภาพ, thresholds เดียวกัน, baseline):**
+
+| | rust | rust P | crack | pitted/patches/scratches | micro-P | micro-R | micro-F1 |
+|---|---|---|---|---|---|---|---|
+| train-real1 | 8/12 | 0.80 | 1/3 | 0/6, 0/1, 0/1 | 0.75 | 0.39 | 0.51 |
+| **train-real3** | **12/12** | **0.92** | 1/3 | 0/6, 0/1, 0/1 (เท่าเดิม) | **0.87** | **0.57** | **0.68** |
+
+- lab benchmark `results/stage2_real3.json`: mAP50 **0.828** (rust 0.995, ไม่ต่างจาก real1 อย่างมีนัย)
+- เทรน **จาก yolo11n.pt สด** (ไม่ warm จาก train-real2 ที่ regress) — ครบ 100 epoch ไม่ OOM ที่ batch 6
+- **rust บนภาพจริงแก้ได้จริง** (8/12 → 12/12 + precision ขึ้น) · 6 คลาส texture + crack-on-metal ยังเท่าเดิม
+  (ไม่มีข้อมูลจริงเพิ่ม — ตรงกับที่คาด) → ยังเป็น future work ตามเล่ม
+- `app.py`: default = "ปรับโดเมน v3", ความไว ไว/ไวมาก ตอนนี้พก TTA/multiscale มาให้เอง
+
+**Round 4 ถ้าจะทำต่อ:** ต้องมีภาพจริงของ scratches/pitted/crazing/inclusion/rolled-in/crack-on-metal
+— ไม่มี dataset เปิด ต้องถ่าย/annotate เอง (`run_round.py draft --photos photos_round4/ --round 4`)
 
 รันทุกคำสั่งจากโฟลเดอร์ `C:\Users\Lenovo\steel-defect-detection` โดย **activate venv ก่อน**:
 

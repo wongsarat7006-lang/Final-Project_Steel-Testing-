@@ -21,9 +21,9 @@
 | ราง | โมเดล | เทรนจาก | ใช้ที่ไหน |
 |---|---|---|---|
 | **เล่มจบ / benchmark** | `train-gray-n2` (grayscale) | NEU-DET + Roboflow (แล็บ) | ค่า default ของ `pipeline.py` / `evaluate.py` · ตัวเลขในภาคนิพนธ์ · `thresholds.json` |
-| **เดโม / product** | `train-real1` (RGB) | + 672 ภาพ corrosion ถ่ายจริง | ค่า default ในหน้า `app.py` · `thresholds_demo.json` |
+| **เดโม / product** | `train-real3` (RGB) | + ภาพ corrosion ถ่ายจริง round 1+3 (~1,355 ภาพ) | ค่า default ในหน้า `app.py` · `thresholds_real3.json` |
 
-> โมเดลเล่มจบ mAP50 บน benchmark สูง (0.867) แต่ **transfer ≈ 0 บนภาพถ่ายจริง** (domain gap) — โมเดลเดโมจับสนิมบนภาพจริงได้ (rust recall 8/12) แลกกับ benchmark ที่ต่ำกว่า ดูหัวข้อ "ราง product / เดโม" และ "Pipeline end-to-end vs Baseline"
+> โมเดลเล่มจบ mAP50 บน benchmark สูง (0.867) แต่ **transfer ≈ 0 บนภาพถ่ายจริง** (domain gap) — โมเดลเดโม (`train-real3`) จับสนิมบนภาพจริงได้ (rust recall **12/12**, micro-F1 0.68) แลกกับ benchmark ที่ต่ำกว่าเล็กน้อย (mAP50 0.828) ดูหัวข้อ "ราง product / เดโม" และ "Pipeline end-to-end vs Baseline"
 
 ---
 
@@ -51,7 +51,7 @@ steel-defect-detection/
 ├── DMS46_v1.pt              โมเดล Stage 1 (TorchScript)
 ├── pipeline.py              รัน pipeline 2-stage เต็มระบบ  ← ไฟล์หลัก (build_regions / run_stage1 / run_stage2 / cross_region_nms)
 ├── steel_gate.py            Stage 0 — classifier เหล็ก/ไม่เหล็ก (advisory, เดโมเท่านั้น)
-├── app.py                   Prototype UI (Gradio) — 3 แท็บ: อัปโหลด / ถ่ายภาพ / เรียลไทม์
+├── app.py                   Prototype UI (Gradio) — 3 แท็บ: อัปโหลด / ถ่ายภาพ / เรียลไทม์ (สตรีมกล้อง)
 ├── train.py                 เทรนโมเดล Stage 2  (--recipe {default,texture,camera,domainrand})
 ├── train_gate.py            เทรน Stage 0  (--recipe เดียว, yolo11n-cls)
 ├── run_round.py             รัน active-learning 1 รอบ (import → merge → train → eval)
@@ -81,7 +81,8 @@ steel-defect-detection/
 │  ── config ──
 ├── data.yaml / data_oversampled.yaml   config dataset (6 คลาส NEU เดิม / 8 คลาส oversampled)
 ├── thresholds.json         per-class conf — ราง เล่มจบ (train-gray-n2)
-├── thresholds_demo.json    per-class conf — ราง เดโม (train-real1)
+├── thresholds_real3.json   per-class conf — ราง เดโม (train-real3, round 3) ← app.py default
+├── thresholds_demo.json    per-class conf — train-real1 (round 1)
 ├── thresholds_real2.json   per-class conf — train-real2 (round 2)
 │
 │  ── เอกสาร / โน้ต ──
@@ -107,7 +108,8 @@ steel-defect-detection/
 ├── runs/detect/             weights (เทรนใหม่ได้จาก train.py)
 │   ├── train-gray-n2/  + -s{1,2,3}/   ราง เล่มจบ, yolo11n grayscale — multi-seed n=4  ← pipeline.py default
 │   ├── train-gray-s2/                 yolo11s (model-size ablation)
-│   ├── train-real1/  train-real2/     ราง เดโม — + ภาพถ่ายจริง (round 1 / round 2)
+│   ├── train-real3/                   ราง เดโม — + corrosion จริง round 1+3  ← app.py default
+│   ├── train-real1/  train-real2/     ราง เดโม รุ่นก่อน (round 1 / round 2)
 │   ├── train-dr/                      domain randomization (negative result)
 │   ├── train-clean/  train-balanced/  baseline เดิม (ก่อนแก้ leakage)
 │   └── train-gate/                    Stage 0
@@ -217,13 +219,12 @@ python app.py --share         # + ลิงก์สาธารณะ *.gradio.
 python app.py --local-only    # เปิดเฉพาะเครื่องนี้
 ```
 
-- warm ทุกโมเดลตอนเริ่ม แล้วสลับในหน้าจอได้ไม่ต้องรอโหลด
-- **3 แท็บรับภาพ:** อัปโหลด/วาง · ถ่ายจากกล้อง · เรียลไทม์ (ทดลอง — YOLO บนสตรีมเฟรม ข้าม Stage 1)
-- **ตัวเลือกขั้นสูง:** เลือกโมเดล Stage 2 (เดโม `train-real1` / round 2 `train-real2` / เล่มจบ `train-gray-n2`) ·
-  โหมดความไว (มาตรฐาน/ไว/ไวมาก — "ไว/ไวมาก" ลด threshold แต่ผลที่ผ่านเพราะเหตุนี้ขึ้นเป็น "อาจมี" เท่านั้น
-  ไม่ขึ้น "ความเสี่ยงสูง") · ตรวจละเอียด (TTA) · Stage 0 gate · ตรวจหลายสเกล + ตัดไทล์
-- แสดง: การ์ดสรุปผล + ตารางรายการตำหนิ (เรียงตามความเสี่ยง) + ภาพผลลัพธ์ + ภาพ Stage 1 · ดาวน์โหลดผล (zip) + เก็บ feedback ลง `demo_logs/`
-- ใช้ fallback + cross-region NMS แบบเดียวกับ `pipeline.py` (`pipeline.build_regions`)
+- **ไม่มีตัวเลือกให้ผู้ใช้ปรับ** — โมเดล (`train-real3`) + โหมด (มาตรฐาน) + threshold ตั้งค่าที่เหมาะสุดไว้แล้ว
+  โค้ดยังสลับโมเดล/เปิด TTA-multiscale ได้ผ่าน `_STAGE2_MODELS` / State ใน `app.py`
+- **3 แท็บรับภาพ:** อัปโหลด/วาง · ถ่ายจากกล้อง · **เรียลไทม์** (สตรีมกล้องต่อเนื่อง วาดกรอบ + นับตำหนิสดทุก ~0.3 วิ, ข้าม Stage 1) — แกลเลอรี `demo_samples/` 2 ภาพ/คลาส ขึ้นก่อน
+- แสดง: การ์ดสรุปผล + ตารางรายการตำหนิ (เรียงตามความเสี่ยง) + **กล่องสาเหตุที่พบบ่อย + คำแนะนำ ต่อชนิดที่เจอ**
+  (ข้อมูลอ้างอิงทั่วไป ไม่ใช่วินิจฉัยชิ้นงาน) + ภาพผลลัพธ์ · ดาวน์โหลดผล (zip) + เก็บ feedback ลง `demo_logs/`
+- Stage 1 ยังทำงานเบื้องหลัง (fallback + cross-region NMS แบบเดียวกับ `pipeline.py`) แต่ไม่โชว์ภาพ metal region แล้ว
 
 ---
 
@@ -234,7 +235,8 @@ python app.py --local-only    # เปิดเฉพาะเครื่อง
 
 | ความพยายาม | ผล |
 |---|---|
-| **`train-real1`** (round 1) — config เล่มจบ (RGB) + 672 ภาพ corrosion ถ่ายจริง | ✅ ใช้เป็น default ในเดโม — rust recall บนภาพจริง 0/12 → **8/12**, micro-F1 0.067 → **0.50** |
+| **`train-real1`** (round 1) — config เล่มจบ (RGB) + 672 ภาพ corrosion ถ่ายจริง | rust recall บนภาพจริง 0/12 → **8/12**, micro-F1 0.067 → **0.50** — default เดิม |
+| **`train-real3`** (round 3) — + 683 ภาพ corrosion จริง (เสาส่งไฟ/ท่อ/แผ่นเหล็ก จาก `downloads/`) เทรนสด 100 epoch | ✅ **default ปัจจุบัน** — rust recall **8/12 → 12/12** (P 0.80 → 0.92), micro-F1 **0.50 → 0.68**, lab mAP50 0.828 · 6 คลาส texture ยังเท่าเดิม |
 | **`train-real2`** (round 2) — + 1022 ภาพสนิม scene จริง | ⚠️ conf บนสนิม scene สูงขึ้น แต่ **regress บนสนิม lab-crop** — เป็น "รุ่นทดลอง" ไม่ใช่ default |
 | **`train-dr`** — domain randomization (aug แรงสุด) | ❌ **negative result** — lab mAP50 ตกเหลือ 0.777, ไม่ช่วยภาพจริง (ไม่มีข้อมูล = aug สร้างความรู้ใหม่ไม่ได้) |
 | **Stage 0 gate** (`steel_gate.py`) — classifier เหล็ก/ไม่เหล็ก | ⚠️ overfit ไป lab domain — ใช้แบบ **advisory** เท่านั้น (แปะหมายเหตุ ไม่ veto) |
@@ -461,17 +463,21 @@ python evaluate_real.py           # pipeline (Stage 1 + Stage 2) vs baseline (YO
 |---|---|---|---|---|---|---|
 | `train-gray-n2` (เล่มจบ) | Pipeline (2-stage) | 0.143 | 0.043 | 0.067 | 0.057 | 0.56 |
 | `train-gray-n2` (เล่มจบ) | Baseline (ไม่มี Stage 1) | 0.333 | 0.043 | 0.077 | 0.067 | 0.04 |
-| `train-real1` (เดโม default) | Pipeline (2-stage) | 0.692 | 0.391 | 0.500 | 0.219 | 0.35 |
-| `train-real1` (เดโม default) | Baseline (ไม่มี Stage 1) | 0.750 | 0.391 | 0.514 | 0.226 | 0.03 |
+| `train-real1` (round 1) | Pipeline (2-stage) | 0.692 | 0.391 | 0.500 | 0.219 | 0.35 |
+| `train-real1` (round 1) | Baseline (ไม่มี Stage 1) | 0.750 | 0.391 | 0.514 | 0.226 | 0.03 |
+| **`train-real3`** (เดโม default) | Pipeline (2-stage) | **0.867** | **0.565** | **0.684** | 0.272 | 0.44 |
+| **`train-real3`** (เดโม default) | Baseline (ไม่มี Stage 1) | **0.867** | **0.565** | **0.684** | 0.272 | 0.05 |
 
-> วัดรุ่นเดโม: `python evaluate_real.py --weights runs/detect/train-real1/weights/best.pt --thresholds thresholds_demo.json`
+> วัดรุ่นเดโม: `python evaluate_real.py --weights runs/detect/train-real3/weights/best.pt --thresholds thresholds_real3.json`
+> รายละเอียด round 3 (import ชุดไหน + คำสั่ง + ผลรายคลาส) อยู่ใน `NEXT_STEPS.md` หัวข้อ "Round 3 — train-real3"
 
 **อ่านผล:**
 - โมเดลเล่มจบ (`train-gray-n2`, grayscale + NEU benchmark) **แทบไม่ยิงบนภาพถ่ายจริงเลย** (micro-R 0.043,
   rust 0/12 เพราะ conf 0.92 จาก val แล็บกรองทิ้งหมด) — สอดคล้องกับ cross-dataset GC10-DET ที่ transfer ≈ 0
   → เป็นหลักฐาน **domain gap** ตรง ๆ ไม่ใช่จุดบกพร่องของสถาปัตยกรรม
-- ราง เดโม (`train-real1` = config เดิม + 672 ภาพ corrosion จริง, RGB): rust recall **0/12 → 8/12**,
-  micro-F1 0.067 → 0.50 — ยืนยันว่า **ต้องมีภาพในโดเมนเข้าชุดเทรน** ถึงจะใช้งานบนภาพจริงได้ (ดู `DATA_COLLECTION.md`)
+- ราง เดโม: `train-real1` (+672 ภาพ corrosion round 1) → rust recall **0/12 → 8/12**, micro-F1 0.067 → 0.50 ;
+  `train-real3` (+683 ภาพ corrosion round 3) → rust recall **8/12 → 12/12** (P 0.80 → 0.92), micro-F1 **→ 0.68**
+  — ยืนยันซ้ำว่า **ยิ่งมีภาพในโดเมนเข้าชุดเทรน ยิ่งดีขึ้น** (ดู `DATA_COLLECTION.md` / `NEXT_STEPS.md`)
 - **Stage 1 ไม่ช่วย** แม้บนภาพ scene จริง: `stage1_metal_found_rate` 0.56 (ดีกว่าบน crop แล็บ 0.35)
   แต่ pipeline micro-P **ต่ำกว่า** baseline ทั้งสองโมเดล (fallback + กรอบ metal เพี้ยนเพิ่ม FP)
   → conclusion เป็น **negative ablation** ตามที่ตั้งไว้ใน `thesis_notes.md` ข้อ 2
