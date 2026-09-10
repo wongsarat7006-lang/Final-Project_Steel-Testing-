@@ -531,19 +531,15 @@ def build_ui():
         )
 
         cur_in = gr.State(None)     # ภาพล่าสุดที่ตรวจ (ไว้ให้ feedback)
-        # ค่าตั้งของ pipeline ที่ไม่ต้องให้ผู้ทดสอบปรับ — คงเป็น State ตามค่าเริ่มต้นเดิม
+        # พารามิเตอร์ทั้งหมดตั้งค่าที่ "ดีที่สุด" ไว้แล้ว — ผู้ใช้ไม่ต้องเลือกเอง
+        #   โมเดล = train-real3 (ตัวแรกใน _STAGE2_MODELS ที่ weights มีจริง)
+        #   ความไว = มาตรฐาน (thresholds_real3.json จูนเน้น recall อยู่แล้ว) · ไม่เปิด TTA/multiscale (ช้า)
+        model_sel = gr.State(model_choices[0] if model_choices else None)
+        sens = gr.State("มาตรฐาน")
         conf = gr.State(0.4)
         detailed = gr.State(False)
         gate_on = gr.State(steel_gate.available())
         multiscale = gr.State(False)
-
-        with gr.Row():
-            model_sel = gr.Dropdown(
-                model_choices, value=model_choices[0] if model_choices else None,
-                label="โมเดล", scale=2)
-            sens = gr.Radio(["มาตรฐาน", "ไว", "ไวมาก"], value="มาตรฐาน",
-                            label="โหมดความไว — ไว = ลดเกณฑ์+ตรวจละเอียด (ช้าขึ้น) · "
-                                  "ไวมาก = + ตรวจหลายสเกล (ช้าสุด เจอบนภาพจริงมากขึ้น)", scale=3)
 
         # ===== รับภาพ: อัปโหลด / ถ่ายภาพ =====
         with gr.Tabs():
@@ -613,11 +609,6 @@ def build_ui():
         _wire(btn.click, inp)
         _wire(inp.change, inp)
         _wire(cam.change, cam)
-        # เปลี่ยนโมเดล/ความไว -> ตรวจภาพล่าสุดซ้ำ
-        for c in (sens, model_sel):
-            (c.change(analyze, inputs=[cur_in, conf, detailed, sens, model_sel, gate_on, multiscale],
-                      outputs=outputs, show_progress="minimal")
-             .then(prepare_download, inputs=[out_img, res_state], outputs=dl))
 
         fb_send.click(submit_feedback,
                       inputs=[cur_in, out_img, res_state, fb_rate, fb_comment], outputs=fb_msg)
