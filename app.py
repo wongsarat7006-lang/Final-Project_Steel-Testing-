@@ -231,15 +231,27 @@ def analyze(image_rgb, conf, detailed, sensitivity, model_key, gate_on, multisca
 _C_OK, _C_MAYBE = (68, 68, 239), (11, 158, 245)   # BGR ~ #ef4444 / #f59e0b
 
 
+_ALL_TH = [P.DEFECT_INFO[c]["name_th"] for c in P.DEFECT_CLASSES]   # 8 ชื่อไทย ตามลำดับคลาส
+
+
 def _rt_card(n, found, err=None):
-    """การ์ดสรุปสดของโหมดเรียลไทม์ — n < 0 = error, 0 = ยังไม่พบ, >0 = จำนวนตำหนิในเฟรม"""
+    """แผงผลสดโหมดเรียลไทม์ — โชว์ทั้ง 8 ชนิด + % ความมั่นใจสูงสุดในเฟรม (ชนิดที่มั่นใจสุด = ตัวหนา)
+    n < 0 = error, 0 = ยังไม่พบ, >0 = จำนวนกล่องตำหนิในเฟรม"""
     if err:
-        return f"<div class='rt-count rt-err'>ประมวลผลเฟรมไม่สำเร็จ: {err}</div>"
-    if not n:
-        return "<div class='rt-count rt-ok'>● ยังไม่พบตำหนิในเฟรม</div>"
-    lst = " · ".join(f"{k} {v:.0%}" for k, v in sorted(found.items(), key=lambda kv: -kv[1]))
-    return (f"<div class='rt-count rt-hit'>● พบตำหนิ <b>{n}</b> จุดในเฟรมนี้</div>"
-            f"<div class='rt-list'>{lst}</div>")
+        return f"<div class='rt-panel rt-err'>ประมวลผลเฟรมไม่สำเร็จ: {err}</div>"
+    head = ("● ยังไม่พบตำหนิในเฟรม" if not n
+            else f"● พบตำหนิ <b>{n}</b> จุด · {len(found)} ชนิด")
+    top = max(found, key=found.get) if found else None
+    rows = []
+    for th in _ALL_TH:
+        v = found.get(th, 0.0)
+        rows.append(
+            f"<div class='rt-row{' rt-row-on' if th == top else ''}'>"
+            f"<span class='rt-name'>{th}</span>"
+            f"<span class='rt-bar'><i style='width:{int(round(v * 100))}%'></i></span>"
+            f"<span class='rt-pct'>{f'{v:.0%}' if v else '—'}</span></div>")
+    return (f"<div class='rt-panel {'rt-hit' if n else 'rt-ok'}'>"
+            f"<div class='rt-head'>{head}</div>{''.join(rows)}</div>")
 
 
 def analyze_stream(frame_rgb):
@@ -664,13 +676,25 @@ body,.gradio-container{background:var(--bg)!important;color:var(--fg)}
 .rt-warn{border:1px solid #fcd9b0;background:#fff7ec;color:#8a4b12;border-radius:10px;
     padding:11px 15px;margin:6px 2px 10px;font-size:13px;line-height:1.7}
 .rt-warn code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:4px;font-size:12px}
-.rt-count{font-size:17px;font-weight:800;padding:12px 16px;border-radius:12px;
-    border:1px solid var(--border);border-left:5px solid var(--border);
-    background:var(--card);margin-top:8px}
-.rt-count.rt-ok{border-left-color:#22c55e;color:#16a34a}
-.rt-count.rt-hit{border-left-color:#ef4444;color:#dc2626}
-.rt-count.rt-err{border-left-color:#f59e0b;color:#b45309;font-size:13px;font-weight:600}
-.rt-list{font-size:14px;color:var(--fg-2);margin-top:6px;padding:0 4px}
+/* แผงผลสด — สไตล์เดียวกับ overlay ในแอปมือถือ (ลิสต์ทุกชนิด + แถบ %) */
+.rt-panel{border:1px solid var(--border);border-left:5px solid var(--border);
+    border-radius:12px;background:var(--card);padding:12px 14px;margin-top:8px}
+.rt-panel.rt-ok{border-left-color:#22c55e}
+.rt-panel.rt-hit{border-left-color:#ef4444}
+.rt-panel.rt-err{border-left-color:#f59e0b;color:#b45309;font-size:13px;font-weight:600;padding:12px 16px}
+.rt-head{font-size:15px;font-weight:800;color:var(--fg);margin-bottom:8px}
+.rt-panel.rt-ok .rt-head{color:#16a34a}
+.rt-panel.rt-hit .rt-head{color:#dc2626}
+.rt-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;color:var(--fg-3)}
+.rt-name{flex:0 0 128px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.rt-bar{flex:1;height:8px;border-radius:5px;background:var(--surface);overflow:hidden}
+.rt-bar>i{display:block;height:100%;background:#cbd5e1;transition:width .2s}
+.rt-pct{flex:0 0 42px;text-align:right;font-variant-numeric:tabular-nums}
+.rt-row-on{color:var(--fg);font-weight:800}
+.rt-row-on .rt-bar>i{background:#ef4444}
+.rt-desc{border:1px solid var(--border);background:var(--surface);border-radius:12px;
+    padding:13px 16px;margin-top:12px;font-size:13px;color:var(--fg-3);line-height:1.7}
+.rt-desc b{color:var(--fg-2)}
 /* feedback */
 .fb{border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-top:12px;background:var(--card)}
 .fb-h{font-size:14.5px;font-weight:800;color:var(--fg);margin-bottom:4px}
@@ -759,6 +783,18 @@ def build_ui():
                 rt_out = gr.Image(type="numpy", label="ผลตรวจสด", interactive=False,
                                   elem_classes=["result-img"])
                 rt_txt = gr.HTML(_rt_card(0, {}))
+                gr.HTML(
+                    "<div class='rt-desc'>"
+                    "<b>โหมดนี้ทำอะไร</b> — จับภาพหน้าจอที่แชร์ทุก ~0.35 วินาที แล้วให้ Stage 2 (YOLO11n) "
+                    "ตรวจตำหนิบนทั้งเฟรม โดย<b>ข้าม Stage 1</b> (ไม่หาพื้นที่เหล็กก่อน) เพื่อให้เร็วพอดูสด<br>"
+                    "<b>อ่านผลยังไง</b> — แถบด้านบนคือภาพหน้าจอพร้อมกรอบตำหนิ · แผงด้านล่างไล่ทั้ง 8 ชนิด "
+                    "ตัวเลข % = ความมั่นใจสูงสุดของชนิดนั้นในเฟรมปัจจุบัน · ชนิดที่มั่นใจสุด = ตัวหนา/แถบแดง · "
+                    "“—” = ไม่พบในเฟรมนี้<br>"
+                    "<b>ข้อจำกัด</b> — โมเดลชุดนี้แม่นเรื่อง<b>สนิม</b>ที่สุด อีก 7 ชนิดบนภาพถ่ายจริงยังพลาดได้บ่อย · "
+                    "เฟรมเบลอ/สั่น/แสงน้อย/ย่อเล็กมาก ทำให้เตือนผิดหรือพลาดได้ · "
+                    "ผลเรียลไทม์เป็นแค่การส่องดูคร่าว ๆ — ให้ยึดผลจากแท็บ “อัปโหลดภาพ” (มี Stage 1 + การจัดระดับความเสี่ยง) เป็นหลัก<br>"
+                    "<b>ต้องเปิดผ่าน https หรือ localhost</b> เท่านั้น การส่องหน้าจอถึงจะทำงาน (ดูกรอบเตือนด้านบนถ้าใช้ไม่ได้)"
+                    "</div>")
 
         # ===== ผลตรวจ (โหมด อัปโหลด + ถ่ายภาพ) =====
         with gr.Row(equal_height=False):
