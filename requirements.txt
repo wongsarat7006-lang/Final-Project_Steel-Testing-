@@ -9,6 +9,11 @@ numpy>=1.26
 # Prototype UI (app.py)
 gradio>=4.44
 
+# REST API สำหรับแอปมือถือ (mobile_api.py) — มากับ gradio อยู่แล้ว ระบุตรงนี้เพราะ mobile_api.py import เอง
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+
 # รูปประกอบรายงาน (make_figures.py)
 matplotlib>=3.8
 

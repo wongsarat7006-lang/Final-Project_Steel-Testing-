@@ -52,6 +52,7 @@ steel-defect-detection/
 ├── pipeline.py              รัน pipeline 2-stage เต็มระบบ  ← ไฟล์หลัก (build_regions / run_stage1 / run_stage2 / cross_region_nms)
 ├── steel_gate.py            Stage 0 — classifier เหล็ก/ไม่เหล็ก (advisory, เดโมเท่านั้น)
 ├── app.py                   Prototype UI (Gradio) — 3 แท็บ: อัปโหลด / ถ่ายภาพ / เรียลไทม์ (ส่องหน้าจอ)
+├── mobile_api.py            REST API (FastAPI) ให้แอปมือถือ Flutter เรียกตรวจ — /detect, /detect_fast
 ├── train.py                 เทรนโมเดล Stage 2  (--recipe {default,texture,camera,domainrand})
 ├── train_gate.py            เทรน Stage 0  (--recipe เดียว, yolo11n-cls)
 ├── run_round.py             รัน active-learning 1 รอบ (import → merge → train → eval)
@@ -225,6 +226,20 @@ python app.py --local-only    # เปิดเฉพาะเครื่อง
 - แสดง: การ์ดสรุปผล + ตารางรายการตำหนิ (เรียงตามความเสี่ยง) + **กล่องสาเหตุที่พบบ่อย + คำแนะนำ ต่อชนิดที่เจอ**
   (ข้อมูลอ้างอิงทั่วไป ไม่ใช่วินิจฉัยชิ้นงาน) + ภาพผลลัพธ์ · ดาวน์โหลดผล (zip) + เก็บ feedback ลง `demo_logs/`
 - Stage 1 ยังทำงานเบื้องหลัง (fallback + cross-region NMS แบบเดียวกับ `pipeline.py`) แต่ไม่โชว์ภาพ metal region แล้ว
+
+### 7. แอปมือถือ (Flutter) — เรียก API แทนรันโมเดลบนเครื่อง
+
+```bash
+python mobile_api.py                  # http://0.0.0.0:8000 — โชว์ IP วง LAN ให้ตอนเริ่ม
+python mobile_api.py --port 8001
+```
+
+- `GET /health` · `POST /detect` (pipeline เต็ม Stage1+Stage2 — ภาพถ่ายเดี่ยว) ·
+  `POST /detect_fast` (Stage2 อย่างเดียว — เฟรมกล้องสด) ทุก endpoint คืน JSON เดียวกับที่ `app.py` ใช้
+  (class, name_th, risk, confidence, bbox, causes, advice) — โมเดล/threshold ชุดเดียวกับหน้าเว็บ (`train-real3`)
+- แอป Flutter ต้นแบบ: `D:\mob_app\steel_defect_scan` (ปรับจาก `app0821c` — ดู README ในโฟลเดอร์นั้น)
+  หน้าแรกเลือกภาพ/ถ่ายภาพ/เรียลไทม์ ตั้ง IP เซิร์ฟเวอร์ผ่านไอคอน ⚙️
+- มือถือ/emulator ต้องอยู่วง LAN เดียวกับเครื่องที่รัน `mobile_api.py` + อนุญาต Windows Firewall พอร์ต 8000
 
 ---
 
