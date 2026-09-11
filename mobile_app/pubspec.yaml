@@ -1,0 +1,25 @@
+name: steel_defect_scan
+description: "ตรวจตำหนิพื้นผิวเหล็ก — เรียก API ของ steel-defect-detection (Python/FastAPI)"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  image_picker: ^1.1.2
+  camera: ^0.10.0
+  http: ^1.2.2
+  shared_preferences: ^2.2.3
+  image: ^4.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
