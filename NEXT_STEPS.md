@@ -118,8 +118,131 @@ python evaluate_real.py --weights runs/detect/train-real3/weights/best.pt --thre
   (ไม่มีข้อมูลจริงเพิ่ม — ตรงกับที่คาด) → ยังเป็น future work ตามเล่ม
 - `app.py`: default = "ปรับโดเมน v3", ความไว ไว/ไวมาก ตอนนี้พก TTA/multiscale มาให้เอง
 
-**Round 4 ถ้าจะทำต่อ:** ต้องมีภาพจริงของ scratches/pitted/crazing/inclusion/rolled-in/crack-on-metal
-— ไม่มี dataset เปิด ต้องถ่าย/annotate เอง (`run_round.py draft --photos photos_round4/ --round 4`)
+### Round 4 — กำลังเก็บข้อมูล (2026-09-12) — ยังไม่เทรน
+
+**crack ✅ เจอ dataset ใช้ได้:**
+```powershell
+python import_labeled.py --src downloads/welding-celebal --round 4 --map "crack=crack"
+```
+→ import ดิบ 91 ภาพ/112 กรอบ, license หน้า Roboflow = "Public Domain" **แต่ตรวจสอบเองแล้วพบว่าปน
+ภาพขโมยจาก iStock 19/727 ภาพในชุดต้นทาง** (ชื่อไฟล์ `istockphoto-<id>-612x612` = ขนาด watermark
+preview ของ iStock พอดี) — 7 ภาพหลุดมาอยู่ในกลุ่ม crack ที่ import แล้ว **ลบออกด้วยมือ** เหลือ
+**84 ภาพ/105 กรอบ ใช้ได้จริงใน `dataset_real/round4`** (39 วิดีโอเฟรมงานเชื่อม + 28 screenshot
+ชุดเดียวกันวันที่ 2022-12-05 + ~17 ภาพค้นทั่วไปที่มาไม่ชัด — พอสำหรับเล่มจบ, ระวังก่อนใช้เวอร์ชันขาย)
+**บทเรียน: license tag บน Roboflow เป็นแค่คนอัปโหลดกรอกเอง ไม่ได้ตรวจสิทธิ์ภาพจริง — ต้อง grep
+ชื่อไฟล์หา istock/shutterstock/getty/alamy/dreamstime/123rf/depositphotos ทุกครั้งก่อนเชื่อ license**
+
+**scratches ❌ ลองแล้วไม่ได้ 2 ตัว:**
+- `Metallic Surface Defect Detector` (sujitsa) — เป็น NEU-DET repackage ซ้ำ (classes ตรงกับ NEU 6 คลาสเป๊ะ) ไม่ใช่ scene จริง — ข้าม
+- `Surface Defects / scratch-Dent` (scratch-8kuvz) 6128 ภาพ — เช็คชื่อไฟล์แล้วเป็น**ภาพตรวจสภาพรถมือสอง**
+  (`hyundai_grand_i10...`, `mahindra_xuv_300...`) สีรถไม่ใช่ผิวเหล็กโครงสร้าง domain mismatch — ตัดสินใจไม่ import
+- ยังไม่มี dataset เปิดที่ใช้ได้สำหรับ scratches — ต้องหาต่อด้วยคำค้นอื่น หรือไปทาง stock photo (Unsplash/Pexels
+  ค้นตรงในเว็บ ไม่ผ่าน search engine ทั่วไป) / ตัดเฟรมวิดีโอ (ระวัง license สำหรับเวอร์ชันขาย)
+
+**scratches ✅ แก้ได้ด้วย MVTec AD** (dataset งานวิจัยจริง ไม่ใช่ Roboflow) — ผู้ใช้ยืนยันว่าโปรเจกต์นี้เป็น
+"ขายเชิงนำเสนอ" ไม่ใช่ขายจริงเชิงพาณิชย์ → license CC BY-NC-SA (non-commercial) ใช้ได้:
+- `metal_nut` category, defect `scratch`: 23 ภาพ + pixel mask จริง (โหลดจาก HF mirror
+  `MSherbinii/mvtec-ad-metal-nut`, public ไม่ต้อง login)
+- `screw` category, defect `scratch_head`+`scratch_neck`: 49 ภาพ + mask (โหลดจาก
+  `Voxel51/mvtec-ad` ผ่าน `samples.json` metadata — mirror อื่น `BrachioLab/mvtec-ad` โดน gated ใช้ไม่ได้)
+- แปลง mask → YOLO bbox เอง (`(mask>127).nonzero()` หา bounding rect) → `dataset_real/round4_mvtec/`
+  → spot-check ภาพ+กรอบด้วยตาแล้วผ่าน (กรอบชี้ตรงรอยขีดจริง)
+- import: `python import_labeled.py --src dataset_real/round4_mvtec --round 4 --map "scratch=scratches" --prefix rb4mvtec_`
+  → **72 ภาพ/72 กรอบ scratches**
+- **ข้อจำกัดที่ต้องรู้:** เป็นภาพวัตถุเดี่ยวพื้นหลังสตูดิโอ (nut/screw ตัวเดียว ไม่ใช่ scene มีพื้นหลัง)
+  โดเมนต่างจาก SHOOTING_GUIDE ที่อยากได้ (รั้ว/ท่อ/เหล็กเส้นในบริบทจริง) — ช่วยให้โมเดลเห็น "รอยขีดข่วนจริง"
+  แทน lab-crop สังเคราะห์ได้ แต่ไม่ใช่ scene-diversity เต็มรูปแบบ
+
+**pitted_surface ❌ ยังไม่เจอเลยสักตัว** — MVTec AD ไม่มีคลาสที่ตรงกับ pitting/corrosion ใน 15 categories
+(bottle/cable/capsule/carpet/grid/hazelnut/leather/metal_nut/pill/screw/tile/toothbrush/transistor/wood/zipper)
+เหมือน scratches เดิม ต้องไปทาง non-Roboflow อื่น — ลองต่อ: Kaggle "Pipeline Corrosion Dataset" (aditya068,
+ยังไม่ได้เช็ค license/เนื้อหา — Kaggle บล็อกดึงหน้าอัตโนมัติ ต้องคนเข้าไปดูเอง)
+
+**สรุปสถานะ round4 (data):** 156 ภาพรวม — crack 103 กรอบ (welding-celebal หลังตัด iStock), scratches
+72 กรอบ (MVTec metal_nut+screw) — pitted_surface ยังไม่มี
+
+### train-real4 (2026-09-13) — ❌ negative result, rollback แล้ว
+
+เทรนจาก yolo11n.pt สด (เหมือน real3), merge round4 (156 ภาพ) เข้า `merged_dataset/train`
+**บั๊กที่เจอระหว่างวัดผล:** `run_round.py train` เรียก `evaluate_real.py` โดยไม่ใส่ `--thresholds` —
+ได้ผลหลอกว่า rust 0/12 (จริงๆ คือใช้ threshold ผิดไฟล์ ไม่ใช่โมเดลพัง) ต้อง `tune_thresholds.py` +
+override rust conf 0.12 (เหมือน real3) แล้ว evaluate ใหม่ทุกครั้งที่ทำ round ต่อจากนี้ **ไม่ใช้ผลจาก
+`run_round.py train` ตรงๆ**
+
+**ผลจริงหลังแก้ threshold (real_test 18 ภาพ, เทียบ real3):**
+
+| | rust | crack | scratches | micro-F1 |
+|---|---|---|---|---|
+| train-real3 | **12/12** | 1/3 | 0/1 | **0.684** |
+| train-real4 | **6/12** ⬇️ | 1/3 (เท่าเดิม) | 0/1 (เท่าเดิม) | **0.4375** ⬇️ |
+
+crack/scratches ที่เพิ่มเข้าไป **ไม่ transfer มาช่วยภาพจริงเลยสักภาพ** แถมทำให้ rust recall ตกครึ่งหนึ่ง —
+สมมติฐาน: ภาพ crack จาก welding-celebal มีพื้นผิวเหล็กเป็นสนิม/ไหม้สีน้ำตาลส้มอยู่ในเฟรมแต่ไม่ได้ label
+เป็น rust (unlabeled hard negative) รบกวนการเรียนรู้ rust ; ภาพ scratches จาก MVTec เป็น object-centric
+พื้นหลังสตูดิโอ ต่างจาก scene จริงมากเกินจะ generalize ข้ามโดเมนได้ด้วยข้อมูลแค่ 72-103 ภาพ
+
+**rollback แล้ว** (`python run_round.py rollback --round 4`) — `merged_dataset/train` กลับสภาพเดิม,
+`app.py`/`pipeline.py` ยังชี้ train-real3 เหมือนเดิม ไม่กระทบเดโม — `dataset_real/round4/` และ
+`runs/detect/train-real4/` ยังเก็บไว้เผื่อวิเคราะห์ต่อ
+
+**ถ้าจะลองต่อ:** แยกตัวแปร ไม่ผสม 2 แหล่งพร้อมกันแบบนี้อีก
+1. ลอง scratches (MVTec) อย่างเดียวก่อน (ตัด crack ออก) — เช็คว่า MVTec เองพอจะรบกวน rust ไหม
+2. ถ้า scratches อย่างเดียวไม่กระทบ rust ค่อยลองเติม crack กลับ แต่ crop ภาพ welding-celebal ให้เหลือ
+   แค่บริเวณรอยเชื่อม ตัดพื้นหลังสนิมที่ไม่ได้ label ออก ลดความเสี่ยง unlabeled hard negative
+3. หรือเพิ่ม normal/rust image เข้าไปพร้อมกันเป็น anchor กันลืม (ผสม lab crop rust กลับเข้าไปด้วย
+   เหมือนที่แนะนำไว้ตอน round2 regress)
+
+### train-real6 (2026-09-13) — crack (welding-celebal) crop-mitigated — ยังเป็นผลลบ, ปิดทางนี้แล้ว
+
+ทดสอบข้อ 2 ข้างบน: crop 84 ภาพ crack ให้เหลือแค่บริเวณรอบรอยแตก (padding 2.5x, ขั้นต่ำ 35% ของภาพเดิม)
+ตัดพื้นหลังสนิม/ไหม้ที่ไม่ได้ label ออกไปเยอะ แล้วเทรนแยก (ไม่มี scratches ปน) จาก yolo11n.pt สด
+
+**สรุปรวมทั้ง 4 รุ่น (real_test 18 ภาพ, threshold แก้ rust->0.12 ทุกตัวแล้ว):**
+
+| รุ่น | ข้อมูลที่เพิ่ม | rust | crack | micro-F1 |
+|---|---|---|---|---|
+| train-real3 (baseline) | — | 12/12 | 1/3 | 0.684 |
+| train-real4 | crack (เต็มภาพ) + scratches | 6/12 ❌❌ | 1/3 | 0.4375 |
+| train-real5 | scratches (MVTec) อย่างเดียว | 11/12 (noise) | 1/3 | 0.703 |
+| **train-real6** | **crack (crop แล้ว) อย่างเดียว** | **9/12 ❌** | **1/3 (เท่าเดิม)** | **0.526** |
+
+**สรุปสุดท้ายเรื่อง crack จาก welding-celebal:** crop ช่วยได้บางส่วน (rust ตกน้อยลงจาก 6/12 เป็น 9/12) แต่
+**ยังตกจาก baseline อยู่ดี (12→9)** และ **crack เองก็ไม่ขยับเลยสักภาพ** (1/3 เท่าทุกรอบ) — สรุปว่า
+welding-celebal ไม่ใช่แหล่งข้อมูลที่ใช้ได้กับโดเมนนี้ ไม่ว่าจะ crop หรือไม่ crop **ปิดทางนี้ ไม่ลองต่อแล้ว**
+rollback แล้ว (`rollback --round 6`) — default ยังเป็น train-real3 เหมือนเดิม
+
+**สรุปภาพรวม round4-6 ทั้งหมด:** พยายามหาข้อมูลจริงสำหรับ scratches/crack จากแหล่งเปิด 3 ทาง
+(Roboflow ทั่วไป, MVTec AD, welding-celebal + crop) — **ไม่มีทางไหนช่วยให้ scratches/crack ตรวจภาพจริง
+ได้ดีขึ้นเลยแม้แต่ภาพเดียว** ยืนยันข้อสรุปเดิมใน `SHOOTING_GUIDE.md`/`DATA_COLLECTION.md` ว่าต้องเป็น
+ภาพ scene จริงที่ถ่ายเอง/คนอื่นถ่ายให้เท่านั้น ไม่มีทางลัดจาก dataset สำเร็จรูปอีกแล้วสำหรับ 2 คลาสนี้
+เก็บไว้เป็นเนื้อหาเล่ม (negative ablation 3 รอบติด มีคุณค่าทางวิชาการ) แต่ไม่ต้องเสียเวลาลองรอบ 7+ ด้วย
+แหล่งข้อมูลแบบเดิมอีก — ถ้าจะลองต่อจริงๆ ต้องเปลี่ยนไปเก็บภาพเองเท่านั้น
+
+### train-real5 (2026-09-13) — scratches (MVTec) ล้วนๆ, ตัด crack ออก — ผล inconclusive
+
+`dataset_real/round5` = MVTec scratches 72 ภาพเท่านั้น (import ซ้ำจาก `round4_mvtec` แหล่งเดิม)
+merge เข้า `merged_dataset/train` ที่ rollback กลับสภาพ pre-round4 แล้ว → เทรนจาก yolo11n.pt สด
+
+**ผล real_test (แก้ threshold แบบเดียวกับ real3/4 แล้ว — rust override 0.12):**
+
+| | rust | crack | scratches | micro-F1 |
+|---|---|---|---|---|
+| train-real3 | 12/12 | 1/3 | 0/1 | 0.684 |
+| train-real4 (crack+scratches) | 6/12 ❌ | 1/3 | 0/1 | 0.4375 |
+| **train-real5 (scratches only)** | **11/12** (ปกติ, noise-level) | 1/3 | **0/1 (เท่าเดิม)** | **0.703** |
+
+**สรุปที่ยืนยันได้ชัด:** rust แทบไม่ตก (12→11, อยู่ในช่วง noise) เมื่อตัด crack (welding-celebal) ออก
+→ **ยืนยันสมมติฐานว่า crack/welding data คือตัวที่ทำให้ rust พังในรอบ 4** ไม่ใช่ MVTec scratches
+**แต่ scratches บนภาพจริงก็ยัง 0/1 เหมือนเดิมทุกรอบ** — MVTec (object-centric, พื้นหลังสตูดิโอ) ไม่ transfer
+มาช่วย scene จริงเลย แม้จะไม่ทำร้ายอะไร ; lab benchmark scratches mAP50 ยังตกด้วยซ้ำ (0.887→0.797)
+เพราะ dataset ผสมกันคนละสไตล์ภาพ
+
+**ข้อสรุปสำหรับเล่ม/การตัดสินใจ:** MVTec ไม่ใช่คำตอบสำหรับ scratches ในโดเมนนี้ — ยืนยันว่าเหตุผลเดิม
+ใน `SHOOTING_GUIDE.md`/`DATA_COLLECTION.md` ถูกต้อง (ต้องเป็นภาพ scene จริงเท่านั้นถึงจะ transfer ได้)
+รายงานเป็น negative ablation เพิ่มอีกอันได้ (เหมือน train-dr) **ไม่ merge train-real5 เป็น default** —
+`app.py`/`pipeline.py` ยังคงชี้ train-real3 เหมือนเดิม (เสถียรสุด, proven ที่สุด)
+`runs/detect/train-real5/` และ `dataset_real/round5/` เก็บไว้เผื่ออ้างอิงในเล่ม ไม่ต้อง rollback
+(ไม่ได้ตั้งเป็น default อยู่แล้ว ไม่กระทบอะไร)
 
 รันทุกคำสั่งจากโฟลเดอร์ `C:\Users\Lenovo\steel-defect-detection` โดย **activate venv ก่อน**:
 
