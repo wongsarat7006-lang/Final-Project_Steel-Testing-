@@ -1,0 +1,67 @@
+{
+  "weights": "runs\\detect\\train-real6\\weights\\best.pt",
+  "data": "C:\\Users\\Lenovo\\steel-defect-detection\\merged_dataset\\data.yaml",
+  "split": "val",
+  "compare_conf": 0.4,
+  "macro_f1_opt": 0.8458,
+  "macro_f1_at_compare": 0.7997,
+  "per_class": {
+    "crazing": {
+      "conf": 0.215,
+      "f1_opt": 0.8999,
+      "f1_at_compare": 0.8159,
+      "precision_opt": 0.8998,
+      "recall_opt": 0.9
+    },
+    "inclusion": {
+      "conf": 0.248,
+      "f1_opt": 0.7561,
+      "f1_at_compare": 0.7324,
+      "precision_opt": 0.7603,
+      "recall_opt": 0.752
+    },
+    "patches": {
+      "conf": 0.23,
+      "f1_opt": 0.8844,
+      "f1_at_compare": 0.8682,
+      "precision_opt": 0.8301,
+      "recall_opt": 0.9462
+    },
+    "pitted_surface": {
+      "conf": 0.287,
+      "f1_opt": 0.9206,
+      "f1_at_compare": 0.8951,
+      "precision_opt": 0.9667,
+      "recall_opt": 0.8788
+    },
+    "rolled-in_scale": {
+      "conf": 0.485,
+      "f1_opt": 0.7636,
+      "f1_at_compare": 0.7166,
+      "precision_opt": 0.8399,
+      "recall_opt": 0.7
+    },
+    "scratches": {
+      "conf": 0.392,
+      "f1_opt": 0.9046,
+      "f1_at_compare": 0.8785,
+      "precision_opt": 0.9504,
+      "recall_opt": 0.863
+    },
+    "rust": {
+      "conf": 0.12,
+      "f1_opt": 1.0,
+      "f1_at_compare": 0.9938,
+      "precision_opt": 1.0,
+      "recall_opt": 1.0,
+      "_note": "override จาก val-tuned 0.872 -> 0.12 (val split overfit เหมือน real3/4/5)"
+    },
+    "crack": {
+      "conf": 0.267,
+      "f1_opt": 0.6371,
+      "f1_at_compare": 0.4974,
+      "precision_opt": 0.6738,
+      "recall_opt": 0.6042
+    }
+  }
+}
